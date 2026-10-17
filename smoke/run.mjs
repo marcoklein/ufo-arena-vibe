@@ -56,9 +56,10 @@ const UFO = globalThis.UFO;
 let fail = 0;
 const ok = (cond, msg) => { console.log((cond ? "  PASS " : "  FAIL ") + msg); if (!cond) fail++; };
 const frame = (n = 1) => { for (let i = 0; i < n; i++) HARNESS.loop(); };
-const fire = (type, code) => (listeners[type] || []).forEach((f) => f({ code, preventDefault() {} }));
-const down = (c) => fire("keydown", c);
-const up = (c) => fire("keyup", c);
+const fire = (type, ev) => (listeners[type] || []).forEach((f) =>
+  f(typeof ev === "string" ? { code: ev, preventDefault() {} } : { preventDefault() {}, ...ev }));
+const down = (ev) => fire("keydown", ev);
+const up = (ev) => fire("keyup", ev);
 
 /* --------------------------------------------------------------- checks */
 ok(typeof HARNESS.loop === "function", "animation loop registered");
@@ -91,10 +92,74 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(30);
   up("KeyD");
   ok(Math.abs(UFO.yaw - y0) > 0.5, `D turns the craft (dYaw ${(UFO.yaw - y0).toFixed(2)} rad)`);
+
+  const y1 = UFO.yaw;
+  down("KeyA");
+  frame(30);
+  up("KeyA");
+  ok(UFO.yaw < y1 - 0.5, `A turns the craft the other way (dYaw ${(UFO.yaw - y1).toFixed(2)} rad)`);
+}
+
+/* driving and firing at the same time must not lock the steering */
+{
+  const y0 = UFO.yaw;
+  down("KeyW");
+  down("Space");
+  down("KeyA");
+  frame(30);
+  up("KeyA");
+  ok(UFO.yaw < y0 - 0.5, `A still steers left while driving and firing (dYaw ${(UFO.yaw - y0).toFixed(2)} rad)`);
+  const y1 = UFO.yaw;
+  down("KeyD");
+  frame(30);
+  up("KeyD");
+  up("Space");
+  up("KeyW");
+  ok(UFO.yaw > y1 + 0.5, `D still steers right while driving and firing (dYaw ${(UFO.yaw - y1).toFixed(2)} rad)`);
+}
+
+/* keys are matched by what they type, not just by physical position, so an
+   unfamiliar layout (or a keyboard that drops the third key) still drives */
+{
+  const y0 = UFO.yaw;
+  down({ key: "a", code: "KeyQ" }); // e.g. AZERTY: the A key is physically KeyQ
+  frame(30);
+  up({ key: "a", code: "KeyQ" });
+  ok(UFO.yaw < y0 - 0.5, `the A key steers left on a shifted layout (dYaw ${(UFO.yaw - y0).toFixed(2)} rad)`);
+
+  const y1 = UFO.yaw;
+  down({ key: "q" });
+  frame(30);
+  up({ key: "q" });
+  ok(UFO.yaw < y1 - 0.5, "Q steers left as well");
+  ok(UFO.keys.length === 0, `no keys stick after release (${UFO.keys.length} held)`);
+
+  const y2 = UFO.yaw;
+  down("KeyE");
+  frame(30);
+  up("KeyE");
+  ok(UFO.yaw > y2 + 0.5, "E steers right");
+}
+
+/* F locks continuous fire so no key has to be held while steering */
+{
+  UFO.move(START.x, START.z);
+  down("KeyF");
+  up("KeyF");
+  frame(40);
+  ok(UFO.fireLock, "F locks the guns on");
+  let peak = 0;
+  for (let i = 0; i < 30; i++) { frame(1); peak = Math.max(peak, UFO.bullets.length); }
+  ok(peak > 0, `the lock keeps firing hands-free (peak ${peak} in flight)`);
+  down("KeyF");
+  up("KeyF");
+  frame(4);
+  ok(!UFO.fireLock, "F releases the lock again");
 }
 
 /* shooting produces bullets */
 {
+  UFO.move(START.x, START.z);
   let peak = 0;
   down("Space");
   for (let i = 0; i < 40; i++) { frame(1); peak = Math.max(peak, UFO.bullets.length); }

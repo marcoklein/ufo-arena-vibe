@@ -141,6 +141,24 @@
         await frames(6);
       }
 
+      // ?keys=1 — drive + fire, then steer both ways, reporting the yaw swing
+      let steer = null;
+      if (new URLSearchParams(location.search).get("keys")) {
+        const y0 = UFO.yaw;
+        key("keydown", "KeyW");
+        key("keydown", "Space");
+        key("keydown", "KeyA");
+        await frames(30);
+        key("keyup", "KeyA");
+        const y1 = UFO.yaw;
+        key("keydown", "KeyD");
+        await frames(30);
+        key("keyup", "KeyD");
+        key("keyup", "Space");
+        key("keyup", "KeyW");
+        steer = { left: +(y1 - y0).toFixed(2), right: +(UFO.yaw - y1).toFixed(2) };
+      }
+
       // ?shot — skip the probe so a screenshot shows only the game.
       if (!location.search.includes("shot")) {
         const pre = document.createElement("pre");
@@ -158,6 +176,7 @@
           canvas: !!document.querySelector("canvas"),
           hud: document.getElementById("lvl") && document.getElementById("lvl").textContent,
           healthbar: document.getElementById("hpbar") && document.getElementById("hpbar").style.width,
+          steer,
         });
         document.body.appendChild(pre);
       }

@@ -1055,21 +1055,50 @@ function clearExplosions() {
 }
 
 /* ------------------------------------------------------------------ input */
+// A key is tracked by its physical code *and* by the character it produces, so
+// the controls still work on layouts where the A key does not report KeyA
+// (AZERTY, Dvorak, ...). Steering with A + W + Space also needs three keys at
+// once, which some keyboards silently drop: Q/E turn as well, and F locks
+// continuous fire so you never have to hold the fire key at all.
 const keys = new Set();
 let mouseDown = false;
+let fireLock = false;
+
+function keyAliases(e) {
+  const out = new Set();
+  if (e.code) { out.add(e.code); out.add(e.code.toLowerCase()); }
+  const k = e.key;
+  if (typeof k === "string" && k.length) {
+    out.add(k);
+    if (k.length === 1) { out.add(k.toLowerCase()); out.add(k.toUpperCase()); }
+  }
+  return out;
+}
+const held = (...names) => names.some((n) => keys.has(n));
+
 addEventListener("keydown", (e) => {
-  if (e.code === "KeyR") {
-    if (state === "dead") restartGame();
-    else startLevel(GAME.level);
+  const names = keyAliases(e);
+  if (names.has("KeyR") || names.has("r") || names.has("R")) {
+    if (!e.repeat) {
+      if (state === "dead") restartGame();
+      else startLevel(GAME.level);
+    }
+    for (const n of names) keys.add(n);
     return;
   }
-  if (e.code.startsWith("Arrow") || e.code === "Space") e.preventDefault();
-  keys.add(e.code);
+  if ((names.has("KeyF") || names.has("f") || names.has("F")) && !e.repeat) fireLock = !fireLock;
+  if (names.has("Space") || names.has(" ") || names.has("ArrowLeft") || names.has("ArrowRight") ||
+      names.has("ArrowUp") || names.has("ArrowDown")) e.preventDefault();
+  for (const n of names) keys.add(n);
 });
-addEventListener("keyup", (e) => keys.delete(e.code));
+addEventListener("keyup", (e) => { for (const n of keyAliases(e)) keys.delete(n); });
 addEventListener("blur", () => { keys.clear(); mouseDown = false; });
-renderer.domElement.addEventListener("pointerdown", () => { mouseDown = true; });
+renderer.domElement.addEventListener("pointerdown", (e) => {
+  mouseDown = true;
+  if (e.cancelable) e.preventDefault();
+});
 addEventListener("pointerup", () => { mouseDown = false; });
+addEventListener("pointercancel", () => { mouseDown = false; });
 
 /* ------------------------------------------------------------------ state */
 const el = {
@@ -1081,6 +1110,7 @@ const el = {
   ovTitle: document.getElementById("ovtitle"),
   ovSub: document.getElementById("ovsub"),
   hurt: document.getElementById("hurt"),
+  auto: document.getElementById("auto"),
 };
 
 const GAME = { level: 1, kills: 0 };
@@ -1256,14 +1286,14 @@ function updateUfo(dt, thrust, turn) {
 function step(dt) {
   fireT -= dt;
   hurtT -= dt;
-  if (keys.has("Space") || mouseDown) tryFire();
+  if (fireLock || mouseDown || held("Space", " ")) tryFire();
 
   let turn = 0;
-  if (keys.has("KeyA") || keys.has("ArrowLeft")) turn -= 1;
-  if (keys.has("KeyD") || keys.has("ArrowRight")) turn += 1;
+  if (held("KeyA", "a", "KeyQ", "q", "ArrowLeft")) turn -= 1;
+  if (held("KeyD", "d", "KeyE", "e", "ArrowRight")) turn += 1;
   let thrust = 0;
-  if (keys.has("KeyW") || keys.has("ArrowUp")) thrust += 1;
-  if (keys.has("KeyS") || keys.has("ArrowDown")) thrust -= 1;
+  if (held("KeyW", "w", "ArrowUp")) thrust += 1;
+  if (held("KeyS", "s", "ArrowDown")) thrust -= 1;
 
   if (turn) yaw += turn * TURN_SPEED * dt;
   if (thrust) {
@@ -1401,6 +1431,7 @@ function updateHud() {
   el.kills.textContent = `${GAME.kills} kills`;
   el.left.textContent = `${monstersLeft()} monsters`;
   el.hp.style.width = `${(hp / PLAYER_HP) * 100}%`;
+  el.auto.style.display = fireLock ? "block" : "none";
 }
 
 /* ------------------------------------------------------- third-person cam */
@@ -1472,6 +1503,8 @@ globalThis.UFO = {
   set yaw(v) { yaw = v; },
   get stuck() { return level.hitsWall(pos.x, pos.z); },
   stuckAt: (x, z) => level.hitsWall(x, z),
+  get fireLock() { return fireLock; },
+  get keys() { return [...keys]; },
   get exit() { return level.exit; },
   get rooms() { return level.rooms; },
   get props() {
