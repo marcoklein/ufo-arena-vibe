@@ -47,6 +47,8 @@ node smoke/shot.mjs smoke/out/arena.png                  # craft in the arena
 node smoke/shot.mjs smoke/out/enemy.png "&pose=enemy"    # parked next to a monster
 node smoke/shot.mjs smoke/out/exit.png  "&pose=exit"     # the exit beacon
 node smoke/shot.mjs smoke/out/prop.png  "&pose=prop"     # a themed room's wall props
+node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"  # freeze mid-fireball
+node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going up
 ```
 
 ## 5. Level map — `smoke/map.html`

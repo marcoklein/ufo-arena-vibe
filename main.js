@@ -846,6 +846,7 @@ function spawnBurst(x, y, z, {
   spread = 0.5,
   shell = 0,
   shock = 0,
+  glow = 0,
   flash = 0,
 } = {}) {
   const p = new Float32Array(count * 3);
@@ -900,6 +901,18 @@ function spawnBurst(x, y, z, {
     scene.add(shockMesh);
   }
 
+  let glowSprite = null;
+  if (glow) {
+    // a billboarded ball of light: the thing that actually reads as a bang
+    glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: sparkTex, color: hot, transparent: true, opacity: 1,
+      blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+    }));
+    glowSprite.position.set(x, y + 0.2, z);
+    glowSprite.scale.setScalar(glow * 0.35);
+    scene.add(glowSprite);
+  }
+
   if (flash) {
     const f = fxLights[fxLightCursor++ % fxLights.length];
     f.light.position.set(x, y + 0.4, z);
@@ -911,7 +924,8 @@ function spawnBurst(x, y, z, {
 
   explosions.push({
     t: 0, life, count, gravity, drag, size, pos: p, vel: v,
-    geo, points, shellMesh, shockMesh, shellSize: shell, shockSize: shock,
+    geo, points, shellMesh, shockMesh, glowSprite,
+    shellSize: shell, shockSize: shock, glowSize: glow,
   });
 }
 
@@ -919,9 +933,9 @@ const BOOM = {
   // a monster going up
   enemy: (type) => ({
     color: type === "spitter" ? 0xa06bff : 0xff7a3c,
-    hot: type === "spitter" ? 0xf2e6ff : 0xfff0cf,
-    count: 34, speed: 16, size: 0.6, life: 0.85,
-    shell: 2.8, shock: 3.4, flash: 230,
+    hot: type === "spitter" ? 0xf4e9ff : 0xfff2d4,
+    count: 46, speed: 19, size: 0.85, life: 0.95,
+    shell: 2.2, shock: 4.2, glow: 6.5, flash: 340,
   }),
   // a bullet puckering out against rock
   spark: () => ({
@@ -930,8 +944,14 @@ const BOOM = {
   }),
   // the craft itself
   player: () => ({
-    color: 0x5fe6ff, hot: 0xffffff, count: 110, speed: 30, size: 1.0,
-    life: 1.5, gravity: 11, drag: 1.9, spread: 1.4, shell: 9, shock: 12, flash: 900,
+    color: 0x49c8ff, hot: 0xdff6ff, count: 150, speed: 34, size: 1.35,
+    life: 1.8, gravity: 11, drag: 1.9, spread: 1.4,
+    shell: 4, shock: 16, glow: 15, flash: 1000,
+  }),
+  // the exit answering when you finally reach it
+  exit: () => ({
+    color: 0xffd23f, hot: 0xfffbe6, count: 60, speed: 22, size: 0.8,
+    life: 1.0, gravity: 8, drag: 2.4, spread: 1, shell: 3, shock: 7, glow: 10, flash: 420,
   }),
 };
 
@@ -940,12 +960,15 @@ function blowUpPlayer() {
   ufo.visible = false;
   shake = Math.min(1.6, shake + 1.2);
   // a few secondary detonations rolling out of the wreck
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 5; i++) {
     const a = fxRng() * Math.PI * 2;
     const r = 1.5 + fxRng() * 3.5;
-    later(0.1 + i * 0.13, () => spawnBurst(
+    later(0.12 + i * 0.14, () => spawnBurst(
       pos.x + Math.cos(a) * r, HOVER + (fxRng() - 0.3) * 1.2, pos.z + Math.sin(a) * r,
-      { color: 0xffb066, hot: 0xfff0cf, count: 26, speed: 17, size: 0.65, life: 0.85, shell: 3, shock: 3.4, flash: 220 }
+      {
+        color: 0xffb066, hot: 0xfff0cf, count: 34, speed: 18, size: 0.9, life: 0.9,
+        shell: 2.5, shock: 4.5, glow: 8, flash: 280,
+      }
     ));
   }
 }
@@ -961,6 +984,7 @@ function updateExplosions(dt) {
       e.points.material.dispose();
       if (e.shellMesh) { scene.remove(e.shellMesh); e.shellMesh.material.dispose(); }
       if (e.shockMesh) { scene.remove(e.shockMesh); e.shockMesh.material.dispose(); }
+      if (e.glowSprite) { scene.remove(e.glowSprite); e.glowSprite.material.dispose(); }
       explosions.splice(i, 1);
       continue;
     }
@@ -985,12 +1009,18 @@ function updateExplosions(dt) {
     e.points.material.size = e.size * (1 - k * 0.55);
 
     if (e.shellMesh) {
-      e.shellMesh.scale.setScalar(e.shellSize * (0.25 + k * 1.15));
-      e.shellMesh.material.opacity = 0.8 * Math.pow(1 - k, 1.7);
+      e.shellMesh.scale.setScalar(e.shellSize * (0.2 + k * 0.85));
+      e.shellMesh.material.opacity = 0.5 * Math.pow(1 - k, 1.6);
     }
     if (e.shockMesh) {
       e.shockMesh.scale.setScalar(e.shockSize * (0.3 + k * 1.5));
-      e.shockMesh.material.opacity = 0.7 * Math.pow(1 - k, 2);
+      e.shockMesh.material.opacity = 0.75 * Math.pow(1 - k, 2);
+    }
+    if (e.glowSprite) {
+      // snap open, then collapse
+      const g = Math.min(1, k / 0.18);
+      e.glowSprite.scale.setScalar(e.glowSize * (0.35 + g * 0.95) * (1 - k * 0.3));
+      e.glowSprite.material.opacity = Math.pow(1 - k, 1.5);
     }
   }
 
@@ -1017,6 +1047,7 @@ function clearExplosions() {
     scene.remove(e.points);
     if (e.shellMesh) scene.remove(e.shellMesh);
     if (e.shockMesh) scene.remove(e.shockMesh);
+    if (e.glowSprite) scene.remove(e.glowSprite);
   }
   explosions.length = 0;
   fxQueue.length = 0;
@@ -1161,7 +1192,11 @@ function hurtPlayer(dmg) {
     hp = 0;
     state = "dead";
     blowUpPlayer();
-    showOverlay("GAME OVER", `Reached level ${GAME.level} · ${GAME.kills} kills · press R to restart`);
+    // let the wreck burn for a beat before the results card covers it
+    later(1.25, () => {
+      if (state !== "dead") return;
+      showOverlay("GAME OVER", `Reached level ${GAME.level} · ${GAME.kills} kills · press R to restart`);
+    });
   }
 }
 
@@ -1352,7 +1387,12 @@ function checkExit() {
   if (Math.hypot(pos.x - ex, pos.z - ez) < CELL * 0.5) {
     state = "cleared";
     clearedT = 0;
-    showOverlay(`LEVEL ${GAME.level} CLEARED`, "Descending to the next level…");
+    spawnBurst(ex, 1.4, ez, BOOM.exit());
+    shake = Math.min(1.3, shake + 0.5);
+    later(0.85, () => {
+      if (state !== "cleared") return;
+      showOverlay(`LEVEL ${GAME.level} CLEARED`, "Descending to the next level…");
+    });
   }
 }
 

@@ -126,6 +126,21 @@
         key("keyup", "Space");
       }
 
+      // ?boom=enemy|player — detonate something and freeze the frame mid-fireball
+      const boom = new URLSearchParams(location.search).get("boom");
+      if (boom === "player") {
+        UFO.damage(999);
+        await frames(6);
+      } else if (boom === "enemy") {
+        const range = Number(new URLSearchParams(location.search).get("range") || 6);
+        const t = UFO.enemies.find((e) => !e.dead);
+        UFO.move(t.x + range * 0.7, t.z + range * 0.7);
+        UFO.aim(t.x, t.z);
+        await frames(20);
+        UFO.kill();
+        await frames(6);
+      }
+
       // ?shot — skip the probe so a screenshot shows only the game.
       if (!location.search.includes("shot")) {
         const pre = document.createElement("pre");

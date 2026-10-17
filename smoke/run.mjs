@@ -142,9 +142,15 @@ ok(!UFO.stuck, "player starts outside the walls");
   UFO.damage(999);
   ok(UFO.state === "dead", "0 hp ends the run");
   ok(UFO.particles > 40, `death detonates the craft (${UFO.particles} particles)`);
+  ok(!document.getElementById("overlay").classList.contains("show"),
+    "the game-over card waits while the wreck burns");
+  frame(120);
+  ok(document.getElementById("overlay").classList.contains("show"),
+    "the game-over card arrives once the blast is over");
   down("KeyR");
   up("KeyR");
   ok(UFO.state === "playing", "R restarts the run");
+  ok(!document.getElementById("overlay").classList.contains("show"), "restart clears the card");
   ok(UFO.level === 1 && UFO.hp === 100 && UFO.kills === 0, "restart resets level, health and score");
   ok(UFO.monsters === 10, `restart respawns level 1 (${UFO.monsters} monsters)`);
 }
@@ -168,6 +174,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   UFO.move(w.x, w.z);
   frame(2);
   ok(UFO.state === "cleared", "standing on the exit clears the level");
+  ok(UFO.explosions > 0, `the exit answers with a blast (${UFO.explosions} active)`);
   frame(140);
   ok(UFO.level === 2, `advanced to level 2 (got ${UFO.level})`);
   ok(UFO.monsters === 13, `level 2 spawns 13 monsters (got ${UFO.monsters})`);
