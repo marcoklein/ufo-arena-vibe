@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>UFO Arena — level map</title>
+    <style>
+      html, body { margin: 0; background: #06080c; }
+      canvas { display: block; image-rendering: pixelated; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Draws the generated layout flat, so the shape of a level can be judged at a
+      glance: rooms in their theme colour, corridors in grey, dead ends visible,
+      start green, exit gold. Screenshot it with Chrome:
+
+        node smoke/shot.mjs smoke/out/map.png "&pose=..."   (no)
+
+        /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+          --headless=new --no-sandbox --window-size=900,900 \
+          --screenshot=smoke/out/map.png \
+          "http://127.0.0.1:8000/smoke/map.html?level=8"
+    -->
+    <script type="module">
+      import { createLevel, CELL } from "../maze.js";
+      import { THEMES } from "../themes.js";
+
+      const q = new URLSearchParams(location.search);
+      const lvl = Number(q.get("level") || 1);
+      const size = Math.min(45, 23 + lvl * 2);
+      const L = createLevel({ cols: size, rows: size, seed: 1000 + lvl });
+
+      const scale = Math.max(6, Math.floor(880 / size));
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = size * scale + 2;
+      document.body.appendChild(cv);
+      const ctx = cv.getContext("2d");
+      ctx.fillStyle = "#070a0f";
+      ctx.fillRect(0, 0, cv.width, cv.height);
+      ctx.translate(1, 1);
+
+      const hex = (n) => `#${n.toString(16).padStart(6, "0")}`;
+      const px = (c) => c * scale;
+
+      // free space
+      for (const [c, r] of L.openCells) {
+        ctx.fillStyle = "#222c38";
+        ctx.fillRect(px(c), px(r), scale, scale);
+      }
+
+      // glowing floor pad per room
+      for (const room of L.rooms) {
+        ctx.strokeStyle = hex(THEMES[room.theme].pad);
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = Math.max(2, scale * 0.35);
+        ctx.strokeRect(px(room.x) + 1.5, px(room.y) + 1.5, px(room.w) - 3, px(room.h) - 3);
+        ctx.globalAlpha = 1;
+      }
+
+      // walls, tinted the way the 3D build tints them
+      for (const key of L.walls) {
+        const [c, r] = key.split(",").map(Number);
+        const theme = L.wallTheme.get(key);
+        if (L.isBorderCell(c, r)) ctx.fillStyle = "#2b3547";
+        else if (theme !== undefined) {
+          ctx.fillStyle = hex(THEMES[theme].wall);
+        } else {
+          const kind = L.wallKind.get(key);
+          ctx.fillStyle = kind === "X" ? "#1d4a4e" : kind === "O" ? "#4a3226" : "#333f52";
+        }
+        ctx.fillRect(px(c), px(r), scale, scale);
+      }
+
+      // themed props
+      ctx.fillStyle = "#ffffff";
+      for (const [key, f] of L.features) {
+        const [c, r] = key.split(",").map(Number);
+        ctx.fillStyle = hex(THEMES[f.theme].prop);
+        ctx.fillRect(px(c) + scale * 0.3, px(r) + scale * 0.3, scale * 0.4, scale * 0.4);
+      }
+
+      // start + exit
+      const dot = (col, row, color) => {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(px(col) + scale / 2, px(row) + scale / 2, Math.max(3, scale * 0.6), 0, Math.PI * 2);
+        ctx.fill();
+      };
+      dot(L.start.col, L.start.row, "#2ee6a6");
+      dot(L.exit.col, L.exit.row, "#ffd23f");
+
+      document.title = `L${lvl} ${size}x${size} rooms=${L.rooms.length} links=${L.stats.links} tight=${L.stats.tight} stubs=${L.stats.stubs}`;
+      const out = document.createElement("pre");
+      out.id = "info";
+      out.style.color = "#9fb0c4";
+      out.style.font = "12px monospace";
+      out.textContent = document.title;
+      document.body.appendChild(out);
+    </script>
+  </body>
+</html>

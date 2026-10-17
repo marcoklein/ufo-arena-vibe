@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>UFO Arena — browser smoke</title>
+    <script>
+      // Headless Chrome does not pump requestAnimationFrame without a
+      // compositor, so drive it from setTimeout and let --virtual-time-budget
+      // fast-forward the whole run.
+      (function () {
+        let id = 1;
+        const timers = new Map();
+        window.requestAnimationFrame = (cb) => {
+          const t = setTimeout(() => { timers.delete(id); cb(performance.now()); }, 16);
+          timers.set(id, t);
+          return id++;
+        };
+        window.cancelAnimationFrame = (h) => {
+          if (timers.has(h)) { clearTimeout(timers.get(h)); timers.delete(h); }
+        };
+      })();
+
+      // Keep the last drawn frame around so --screenshot can capture WebGL.
+      // Test-only: the game itself is unchanged.
+      (function () {
+        const orig = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+          if (String(type).includes("webgl")) {
+            attrs = Object.assign({}, attrs, { preserveDrawingBuffer: true });
+          }
+          return orig.call(this, type, attrs);
+        };
+      })();
+
+      // Collected before the game module runs, so load errors are captured.
+      window.__err = [];
+      window.addEventListener("error", (e) => window.__err.push("ERROR: " + (e.message || e.error)));
+      window.addEventListener("unhandledrejection", (e) =>
+        window.__err.push("REJECT: " + ((e.reason && e.reason.message) || e.reason))
+      );
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.186.1/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      // Reuse the real markup and styling from index.html so this page tests
+      // exactly what the game ships with.
+      const html = await fetch("../index.html").then((r) => r.text());
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      document.head.appendChild(document.importNode(doc.head.querySelector("style"), true));
+      document.body.innerHTML = doc.body.innerHTML.replace(/<script[\s\S]*?<\/script>/g, "");
+
+      await import("../main.js");
+      const UFO = window.UFO;
+
+      const frames = (n) => new Promise((res) => {
+        let i = 0;
+        const step = () => { if (++i >= n) return res(); requestAnimationFrame(step); };
+        requestAnimationFrame(step);
+      });
+      const key = (type, code) =>
+        window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true, cancelable: true }));
+
+      // ?pose=enemy — park next to a monster and face it.
+      // ?pose=exit  — park on the exit so the goal marker is in view.
+      const pose = new URLSearchParams(location.search).get("pose");
+
+      await frames(5);
+      const start = { x: UFO.pos.x, z: UFO.pos.z, hp: UFO.hp };
+      let moved = 0;
+      let peakBullets = 0;
+
+      if (pose === "enemy") {
+        const t = UFO.enemies.find((e) => !e.dead && e.type === "grunt") || UFO.enemies[0];
+        UFO.move(t.x + 7, t.z + 7);
+        UFO.aim(t.x, t.z);
+        await frames(30);
+      } else if (pose === "exit") {
+        const w = UFO.worldOf(UFO.exit.col, UFO.exit.row);
+        UFO.move(w.x - 6, w.z + 6);
+        UFO.aim(w.x, w.z);
+        await frames(30);
+      } else if (pose === "prop") {
+        // stand back from a themed room's wall prop, inside the room it lines
+        const centers = UFO.rooms.map((r) => {
+          const w = UFO.worldOf(r.cx, r.cy);
+          return { x: w.x, z: w.z };
+        });
+        outer: for (const p of UFO.props) {
+          let near = centers[0];
+          let bd = Infinity;
+          for (const c of centers) {
+            const d = Math.hypot(c.x - p.x, c.z - p.z);
+            if (d < bd) { bd = d; near = c; }
+          }
+          const dx = near.x - p.x;
+          const dz = near.z - p.z;
+          const d = Math.hypot(dx, dz) || 1;
+          for (const dist of [0.55, 0.75, 1]) {
+            const vx = p.x + (dx / d) * bd * dist;
+            const vz = p.z + (dz / d) * bd * dist;
+            if (UFO.stuckAt(vx, vz)) continue;
+            UFO.move(vx, vz);
+            UFO.aim(p.x, p.z);
+            await frames(30);
+            break outer;
+          }
+        }
+      } else if (pose === "none") {
+        await frames(10);
+      } else {
+        // drive for a second, then shoot for a bit
+        key("keydown", "KeyW");
+        await frames(60);
+        key("keyup", "KeyW");
+        moved = Math.hypot(UFO.pos.x - start.x, UFO.pos.z - start.z);
+
+        key("keydown", "Space");
+        for (let i = 0; i < 40; i++) { await frames(1); peakBullets = Math.max(peakBullets, UFO.bullets.length); }
+        key("keyup", "Space");
+      }
+
+      // ?shot — skip the probe so a screenshot shows only the game.
+      if (!location.search.includes("shot")) {
+        const pre = document.createElement("pre");
+        pre.id = "probe";
+        pre.textContent = JSON.stringify({
+          errors: window.__err,
+          booted: !!UFO,
+          level: UFO.level,
+          state: UFO.state,
+          hp: UFO.hp,
+          monsters: UFO.monsters,
+          stuck: UFO.stuck,
+          movedInOneSecond: +moved.toFixed(1),
+          peakBullets,
+          canvas: !!document.querySelector("canvas"),
+          hud: document.getElementById("lvl") && document.getElementById("lvl").textContent,
+          healthbar: document.getElementById("hpbar") && document.getElementById("hpbar").style.width,
+        });
+        document.body.appendChild(pre);
+      }
+
+      // ?data — hand the rendered frame back as a data URL so a headless run
+      // can write a real PNG (see smoke/shot.mjs).
+      if (location.search.includes("data")) {
+        const out = document.createElement("pre");
+        out.id = "shot";
+        out.style.display = "none";
+        out.textContent = document.querySelector("canvas").toDataURL("image/png");
+        document.body.appendChild(out);
+      }
+    </script>
+  </body>
+</html>

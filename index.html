@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UFO Arena</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: #0b0f14; }
+      canvas { display: block; }
+
+      #hud, #hint, #overlay {
+        position: fixed;
+        user-select: none;
+        pointer-events: none;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+
+      #hud {
+        left: 16px; top: 14px;
+        color: #cbd5e1;
+        text-shadow: 0 1px 3px #000;
+        font-size: 14px;
+        line-height: 1.7;
+        min-width: 190px;
+      }
+      #hud .top { display: flex; justify-content: space-between; gap: 14px; }
+      #lvl { color: #7dd3fc; font-weight: 700; letter-spacing: 0.06em; }
+      #kills { color: #facc15; }
+      #hpwrap {
+        margin-top: 7px;
+        height: 9px;
+        background: rgba(148, 163, 184, 0.22);
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        border-radius: 5px;
+        overflow: hidden;
+      }
+      #hpbar {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #22c55e, #a3e635);
+        transition: width 0.12s linear;
+      }
+      #left { color: #fca5a5; }
+
+      #hint {
+        left: 50%; bottom: 14px;
+        transform: translateX(-50%);
+        color: #8296ad;
+        font-size: 13px;
+        text-shadow: 0 1px 3px #000;
+        white-space: nowrap;
+      }
+      #hint b { color: #7dd3fc; }
+
+      #overlay {
+        inset: 0;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        background: rgba(3, 7, 12, 0.72);
+        color: #f8fafc;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        text-align: center;
+      }
+      #overlay.show { display: flex; }
+      #ovtitle {
+        font-weight: 700;
+        font-size: clamp(26px, 6vw, 52px);
+        letter-spacing: 0.08em;
+        text-shadow: 0 0 26px rgba(125, 211, 252, 0.6);
+      }
+      #ovsub { font-size: clamp(13px, 2.2vw, 17px); color: #93a3b8; }
+
+      #hurt {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(ellipse at center, rgba(255, 0, 40, 0) 38%, rgba(214, 22, 60, 0.62) 100%);
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.186.1/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="hurt"></div>
+    <div id="hud">
+      <div class="top"><span id="lvl">Level 1</span><span id="kills">0 kills</span></div>
+      <div id="hpwrap"><div id="hpbar"></div></div>
+      <div id="left">0 monsters</div>
+    </div>
+    <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> turn &middot; <b>Space</b>/click shoot &middot; <b>R</b> restart</div>
+    <div id="overlay"><span id="ovtitle"></span><span id="ovsub"></span></div>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
