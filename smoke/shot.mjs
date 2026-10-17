@@ -22,6 +22,9 @@ const dom = execFileSync(
     "--headless=new",
     "--enable-unsafe-swiftshader",
     "--no-sandbox",
+    // no shared profile: chrome would otherwise serve main.js from its HTTP cache
+    "--incognito",
+    "--disk-cache-size=1",
     `--window-size=${size}`,
     "--virtual-time-budget=9000",
     "--dump-dom",

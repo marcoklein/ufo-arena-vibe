@@ -42,7 +42,29 @@
         transition: width 0.12s linear;
       }
       #left { color: #fca5a5; }
-      #auto { display: none; color: #7dd3fc; font-weight: 700; letter-spacing: 0.08em; }
+      #hunt {
+        display: none;
+        margin-top: 3px;
+        color: #ff5d8f;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-shadow: 0 0 12px rgba(255, 60, 120, 0.75);
+        animation: huntpulse 0.55s ease-in-out infinite alternate;
+      }
+      @keyframes huntpulse {
+        from { opacity: 0.45; }
+        to { opacity: 1; }
+      }
+
+      /* the shade closing in: a red press at the edges of the screen */
+      #huntveil {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0;
+        background: radial-gradient(ellipse at center,
+          rgba(60, 0, 30, 0) 24%, rgba(120, 0, 48, 0.34) 62%, rgba(168, 4, 62, 0.62) 100%);
+      }
 
       #hint {
         left: 50%; bottom: 14px;
@@ -93,13 +115,14 @@
   </head>
   <body>
     <div id="hurt"></div>
+    <div id="huntveil"></div>
     <div id="hud">
       <div class="top"><span id="lvl">Level 1</span><span id="kills">0 kills</span></div>
       <div id="hpwrap"><div id="hpbar"></div></div>
       <div id="left">0 monsters</div>
-      <div id="auto">AUTO-FIRE · F</div>
+      <div id="hunt">&#9650; THE SHADE IS AWAKE &#9650;</div>
     </div>
-    <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> or <b>Q</b>/<b>E</b> turn &middot; <b>Space</b>/click shoot &middot; <b>F</b> hold fire &middot; <b>R</b> restart</div>
+    <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> or <b>&larr;</b>/<b>&rarr;</b> turn &middot; <b>Space</b>/click shoot &middot; <b>R</b> restart</div>
     <div id="overlay"><span id="ovtitle"></span><span id="ovsub"></span></div>
     <script type="module" src="./main.js"></script>
   </body>

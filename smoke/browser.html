@@ -76,6 +76,18 @@
       let moved = 0;
       let peakBullets = 0;
 
+      // stand somewhere with a clear line to (tx, tz): first free spot wins
+      const vantage = (tx, tz, dist) => {
+        for (const [dx, dz] of [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]) {
+          const x = tx + dx * dist;
+          const z = tz + dz * dist;
+          if (UFO.stuckAt(x, z)) continue;
+          if (UFO.stuckAt(tx + dx * dist * 0.55, tz + dz * dist * 0.55)) continue; // wall in the way
+          return { x, z };
+        }
+        return null;
+      };
+
       if (pose === "enemy") {
         const t = UFO.enemies.find((e) => !e.dead && e.type === "grunt") || UFO.enemies[0];
         UFO.move(t.x + 7, t.z + 7);
@@ -112,6 +124,32 @@
             break outer;
           }
         }
+      } else if (pose === "lurk") {
+        // just outside its waking distance: a shadow on the floor
+        const s = UFO.shades.find((e) => !e.dead);
+        if (s) {
+          const v = vantage(s.x, s.z, 25) || vantage(s.x, s.z, 30);
+          if (v) { UFO.move(v.x, v.z); UFO.aim(s.x, s.z); }
+        }
+        await frames(30);
+      } else if (pose === "shade") {
+        // close enough that it wakes, then watch it come for you
+        const s = UFO.shades.find((e) => !e.dead);
+        if (s) {
+          const v = vantage(s.x, s.z, 14);
+          if (v) { UFO.move(v.x, v.z); UFO.aim(s.x, s.z); }
+        }
+        await frames(64);
+      } else if (pose === "rift") {
+        // find a rift we can actually see from a few paces away
+        for (const r of UFO.rifts) {
+          const v = vantage(r.x, r.z, 11);
+          if (!v) continue;
+          UFO.move(v.x, v.z);
+          UFO.aim(r.x, r.z);
+          break;
+        }
+        await frames(30);
       } else if (pose === "none") {
         await frames(10);
       } else {
@@ -159,6 +197,19 @@
         steer = { left: +(y1 - y0).toFixed(2), right: +(UFO.yaw - y1).toFixed(2) };
       }
 
+      // ?hunt — wake a shade and report the hunted state
+      if (new URLSearchParams(location.search).has("hunt")) {
+        const s = UFO.shades.find((e) => !e.dead);
+        if (s) {
+          UFO.move(s.x + 12, s.z);
+          await frames(30);
+        }
+      }
+
+      // ?settle=N — let the level run on by itself before the probe reads it
+      const settle = Number(new URLSearchParams(location.search).get("settle") || 0);
+      if (settle > 0) await frames(settle);
+
       // ?shot — skip the probe so a screenshot shows only the game.
       if (!location.search.includes("shot")) {
         const pre = document.createElement("pre");
@@ -177,6 +228,12 @@
           hud: document.getElementById("lvl") && document.getElementById("lvl").textContent,
           healthbar: document.getElementById("hpbar") && document.getElementById("hpbar").style.width,
           steer,
+          hunted: UFO.hunted,
+          shades: UFO.shades.length,
+          rifts: UFO.rifts.length,
+          riftsOpened: UFO.riftsOpened,
+          veil: document.getElementById("huntveil").style.opacity,
+          huntTag: document.getElementById("hunt").style.display,
         });
         document.body.appendChild(pre);
       }

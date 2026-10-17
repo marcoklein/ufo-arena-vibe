@@ -115,6 +115,7 @@ export class Color {
 
 class Material {
   constructor(opts = {}) { Object.assign(this, opts); this.emissiveIntensity = opts.emissiveIntensity ?? 1; this.dispose = () => {}; }
+  clone() { return new this.constructor(this); }
 }
 export class MeshStandardMaterial extends Material {}
 export class MeshBasicMaterial extends Material {}
@@ -164,6 +165,7 @@ export const SRGBColorSpace = "srgb";
 export const RepeatWrapping = 1000;
 export const EquirectangularReflectionMapping = 303;
 export const AdditiveBlending = 2;
+export const NormalBlending = 1;
 export const DoubleSide = 2;
 export const PCFSoftShadowMap = 2;
 export const ACESFilmicToneMapping = 4;

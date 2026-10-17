@@ -70,7 +70,7 @@ const START = { x: UFO.pos.x, z: UFO.pos.z };
 ok(UFO.level === 1, `boots on level 1 (got ${UFO.level})`);
 ok(UFO.state === "playing", "boots in the playing state");
 ok(UFO.hp === 100, `full health at start (${UFO.hp})`);
-ok(UFO.monsters === 10, `level 1 spawns 10 monsters (got ${UFO.monsters})`);
+ok(UFO.monsters === 11, `level 1 spawns 11 monsters (got ${UFO.monsters})`);
 ok(!UFO.stuck, "player starts outside the walls");
 
 /* movement */
@@ -119,42 +119,21 @@ ok(!UFO.stuck, "player starts outside the walls");
 }
 
 /* keys are matched by what they type, not just by physical position, so an
-   unfamiliar layout (or a keyboard that drops the third key) still drives */
+   unfamiliar layout still drives */
 {
   const y0 = UFO.yaw;
   down({ key: "a", code: "KeyQ" }); // e.g. AZERTY: the A key is physically KeyQ
   frame(30);
   up({ key: "a", code: "KeyQ" });
   ok(UFO.yaw < y0 - 0.5, `the A key steers left on a shifted layout (dYaw ${(UFO.yaw - y0).toFixed(2)} rad)`);
-
-  const y1 = UFO.yaw;
-  down({ key: "q" });
-  frame(30);
-  up({ key: "q" });
-  ok(UFO.yaw < y1 - 0.5, "Q steers left as well");
   ok(UFO.keys.length === 0, `no keys stick after release (${UFO.keys.length} held)`);
 
-  const y2 = UFO.yaw;
-  down("KeyE");
+  const y1 = UFO.yaw;
+  down({ key: "D", code: "KeyD" }); // as if shift/capslock were in the mix
   frame(30);
-  up("KeyE");
-  ok(UFO.yaw > y2 + 0.5, "E steers right");
-}
-
-/* F locks continuous fire so no key has to be held while steering */
-{
-  UFO.move(START.x, START.z);
-  down("KeyF");
-  up("KeyF");
-  frame(40);
-  ok(UFO.fireLock, "F locks the guns on");
-  let peak = 0;
-  for (let i = 0; i < 30; i++) { frame(1); peak = Math.max(peak, UFO.bullets.length); }
-  ok(peak > 0, `the lock keeps firing hands-free (peak ${peak} in flight)`);
-  down("KeyF");
-  up("KeyF");
-  frame(4);
-  ok(!UFO.fireLock, "F releases the lock again");
+  up({ key: "d", code: "KeyD" });
+  ok(UFO.yaw > y1 + 0.5, "D still steers when the typed case differs");
+  ok(UFO.keys.length === 0, `still nothing stuck (${UFO.keys.length} held)`);
 }
 
 /* shooting produces bullets */
@@ -186,8 +165,9 @@ ok(!UFO.stuck, "player starts outside the walls");
     }
   }
   ok(landed, `shots kill monsters (${UFO.kills - k0} killed)`);
-  ok(UFO.monsters < 10, `monster count drops (${UFO.monsters} left)`);
+  ok(UFO.monsters < 11, `monster count drops (${UFO.monsters} left)`);
   ok(UFO.particles > 0, `a kill throws debris (${UFO.particles} particles)`);
+  ok(UFO.gore.length > 0, `a kill throws guts too (${UFO.gore.length} chunks)`);
 }
 
 /* guards hold their post instead of trailing the player */
@@ -217,7 +197,43 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.state === "playing", "R restarts the run");
   ok(!document.getElementById("overlay").classList.contains("show"), "restart clears the card");
   ok(UFO.level === 1 && UFO.hp === 100 && UFO.kills === 0, "restart resets level, health and score");
-  ok(UFO.monsters === 10, `restart respawns level 1 (${UFO.monsters} monsters)`);
+  ok(UFO.monsters === 11, `restart respawns level 1 (${UFO.monsters} monsters)`);
+}
+
+/* a shade waits in the rooms, wakes up, and takes the craft with it */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  const shade = UFO.shades.find((e) => !e.dead);
+  ok(!!shade, `a shade is waiting in the rooms (${UFO.shades.length} of them)`);
+  ok(!!shade && shade.state === "lurk", `it starts as a shadow on the floor (${shade && shade.state})`);
+  ok(UFO.rifts.length > 0, `rifts are seeded as spawn points (${UFO.rifts.length})`);
+
+  UFO.move(shade.x + 18, shade.z);
+  frame(20);
+  ok(shade.state !== "lurk", `it wakes when you get close (${shade.state})`);
+  ok(UFO.hunted, "the screen knows you are being hunted");
+
+  let died = false;
+  for (let i = 0; i < 300 && !died; i++) {
+    UFO.move(shade.x, shade.z);
+    frame(1);
+    if (UFO.state === "dead") died = true;
+  }
+  ok(died, "touching the shade ends the run");
+  ok(UFO.hp === 0, "the shade is an instant kill, no matter the health");
+  const chunks = UFO.gore.length;
+  frame(90);
+  ok(chunks > 0, `the wreck throws guts (${chunks} chunks)`);
+  ok(UFO.splats.length > 0, `and they leave a mess on the floor (${UFO.splats.length} stains)`);
+
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  ok(UFO.state === "playing", "R restarts after the shade");
+  ok(UFO.gore.length === 0 && UFO.splats.length === 0, "the mess is cleared with the level");
+  ok(!UFO.hunted, "and the hunt is off again");
 }
 
 /* enemies actually chase and can hurt the player */
@@ -242,7 +258,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.explosions > 0, `the exit answers with a blast (${UFO.explosions} active)`);
   frame(140);
   ok(UFO.level === 2, `advanced to level 2 (got ${UFO.level})`);
-  ok(UFO.monsters === 13, `level 2 spawns 13 monsters (got ${UFO.monsters})`);
+  ok(UFO.monsters === 14, `level 2 spawns 14 monsters (got ${UFO.monsters})`);
   ok(UFO.hp === 100, "health is restored on a new level");
 }
 
@@ -273,6 +289,12 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(stuck === 0, `never ends a frame inside a wall over 4000 frames (${stuck} bad)`);
   console.log(`  info: random play hit ${deaths} deaths, advanced ${levels} level(s)`);
 }
+
+/* the rifts actually produce monsters while a level runs */
+frame(900);
+ok(UFO.riftsOpened > 0, `rifts keep spawning monsters (${UFO.riftsOpened} opened so far)`);
+ok(UFO.rifts.length > 0, `and the level always has its spawn points (${UFO.rifts.length})`);
+ok(UFO.monsters > 0, "the level does not run out of monsters");
 
 /* a couple of frames of normal play after all that */
 frame(300);
