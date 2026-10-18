@@ -29,9 +29,11 @@ It also checks the two levels and the holes in them:
   the gaps between them are what it hovers over) stay inside rooms with a cell to
   spare at every edge, never on a doorway approach, never on the start or exit
   cell, and at least one lift pad stands beside one;
-* a vault is a sealed ring of blocks with a pocket of floor and a pad inside it -
-  the only way in is to hover over the ring - and it really is sealed on all four
-  sides;
+* a vault is a ring of blocks round a 3x3 courtyard with a lift pad in the middle:
+  the only way in is to hover over the ring, the courtyard is a full 3x3 of open
+  floor, and the pad has a cell of open floor on every side - so it can always be
+  driven off, which is what lets it re-arm. A pad that could not be driven off (a
+  one-cell pocket) used to strand the craft inside it;
 * a hole is not a wall: it is a cell with no ground. `hitsWall` (the craft) lets
   it through, `hitsGround` (anything that walks) does not, and `holeAt` says it is
   a hole. Room holes keep a cell clear of every room edge; a *void* run is a
@@ -40,8 +42,8 @@ It also checks the two levels and the holes in them:
 * a roof is a tunnel: solid in the level above, open on the floor, and never over
   a hole or a pad. There are more of them the bigger the map, because they are what
   stops the level above from being a free flight path over everything;
-* the pads themselves are one and up per level, each on open floor with room
-  around it, in its own cell, not on the start or the exit, reachable on foot, and
+* the pads themselves are one and up per level, each on open floor with a 3x3 of
+  room around it (the four sides at the very least), in its own cell, not on the start or the exit, reachable on foot, and
   one of them a short run from the exit. The level that introduces the lift also
   gets a pad (and a small deck) in the room you start in.
 
@@ -62,8 +64,9 @@ up by `loader.mjs`) and a fake DOM, then drives the actual game loop with
 scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
 blast (at that range it is instant death now, and backing out of the kill ring is
 the only way to survive one), parks on top of one and watches it go off on the spot,
-walks out of one and does not, rides a lift pad up one level and checks what that
-level does (low blocks
+walks out of one and does not, gets into a vault courtyard, takes the pad out, comes
+back down inside it and checks the pad re-arms so it can leave again, rides a lift
+pad up one level and checks what that level does (low blocks
 underneath, walls still in the way, the hover meter draining over open floor and
 filling on a block top, shots and globs carrying the level they are fired on, a
 mine underneath that cannot latch on, the thruster lit only while it is paying to
@@ -129,8 +132,9 @@ meter running, so the thruster is lit), `pit` (a hole in the floor, a few paces
 ahead), `pitair` (standing on a deck at the lip of a hole), `holeTop` (straight
 down over a hole: the flat black square and its lip), `tunnel` (down under a roof,
 where the level above is closed), `spawners` (the introduction level, with its one
-spawner opening in front of the craft), `edge` (inside the map, looking out over the rim of
-nothing). Extras: `&boom=enemy|player`
+spawner opening in front of the craft), `edge` (inside the map, looking out over the
+rim of nothing), `vaultTop` (straight down over a courtyard: the ring, the floor and
+the pad in the middle). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),

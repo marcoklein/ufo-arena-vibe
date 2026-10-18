@@ -241,7 +241,8 @@ function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
 function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
   const upper = new Set();   // low blocks: the level above the floor
   const holes = new Set();   // holes in the floor: nothing up there to land on
-  const vaults = [];         // pockets that only open from above
+  const vaults = [];         // courtyards that only open from above
+  const vaultRings = new Set(); // ...and the rings of blocks round them
   const roomCells = new Set();
   for (const room of rooms) {
     for (let r = room.y; r < room.y + room.h; r++) {
@@ -323,32 +324,55 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
     return made;
   };
 
-  /* a ring of blocks with a pocket of floor in it: hover in, pad out */
-  const vault = (x0, y0, x1, y1, iw, ih) => {
-    if (iw < 4 || ih < 4) return 0; // a 3x3 ring and a cell of play round it
-    const cx = x0 + 1 + Math.floor(rng() * (iw - 3));
-    const cy = y0 + 1 + Math.floor(rng() * (ih - 3));
-    const ring = [];
-    for (let r = cy; r < cy + 3; r++) {
-      for (let c = cx; c < cx + 3; c++) {
-        if (c === cx || c === cx + 2 || r === cy || r === cy + 2) ring.push([c, r]);
+  /* A ring of blocks round a courtyard: hover in over the ring, and the pad in the
+     middle takes you out again. The courtyard is 3x3 cells, so the pad in its
+     centre has open floor on all four sides - room to drive off it, which is what
+     lets a spent pad re-arm, and room to sit beside it and recharge. The ring may
+     hug the wall of its room (there is always a lane round one side, since the ring
+     is a cell narrower than the room), but no ring cell may sit on a doorway. */
+  const vault = (room, keepOut = null) => {
+    const SIDE = 5;
+    const mid = 2;
+    if (room.w < SIDE + 1 || room.h < SIDE + 1) return 0;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const cx = room.x + Math.floor(rng() * (room.w - SIDE + 1));
+      const cy = room.y + Math.floor(rng() * (room.h - SIDE + 1));
+      // a courtyard round the cell the run starts on would trap the craft in its
+      // own landing pad
+      if (keepOut &&
+          Math.abs(cx + mid - keepOut.col) <= 1 && Math.abs(cy + mid - keepOut.row) <= 1) continue;
+      const ring = [];
+      for (let r = cy; r < cy + SIDE; r++) {
+        for (let c = cx; c < cx + SIDE; c++) {
+          const edge = c === cx || c === cx + SIDE - 1 || r === cy || r === cy + SIDE - 1;
+          if (edge) ring.push([c, r]);
+        }
       }
+      // a pillar standing in the way of the ring, or in the courtyard itself, is
+      // scenery: take it out, so a courtyard can be cut into a hall with columns
+      for (let r = cy; r < cy + SIDE; r++) {
+        for (let c = cx; c < cx + SIDE; c++) {
+          if (grid[r][c] === "#" && !doorway(c, r)) grid[r][c] = ".";
+        }
+      }
+      if (!ring.every(([c, r]) => clear(c, r))) continue; // a broken ring is no vault
+      let made = 0;
+      for (const [c, r] of ring) {
+        if (raise(c, r)) made++;
+        vaultRings.add(`${c},${r}`);
+      }
+      // a landing run off one side, so there is somewhere to come down outside it
+      const [dc, dr] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(rng() * 4)];
+      for (let k = 1; k <= 2; k++) {
+        const c = cx + mid + dc * (mid + k);
+        const r = cy + mid + dr * (mid + k);
+        if (c < room.x + 1 || c > room.x + room.w - 2 || r < room.y + 1 || r > room.y + room.h - 2) break;
+        if (raise(c, r)) made++;
+      }
+      vaults.push({ col: cx + mid, row: cy + mid }); // the middle of the courtyard
+      return made;
     }
-    if (!ring.every(([c, r]) => clear(c, r))) return 0; // a broken ring is no vault
-    let made = 0;
-    for (const [c, r] of ring) if (raise(c, r)) made++;
-    // a landing run off one side, so there is somewhere to come down outside it.
-    // It stays inside the build's own box: a landing may not reach round the back
-    // of the ring into the rim of the room.
-    const [dc, dr] = [[1, 0], [-1, 0], [0, 1], [0, -1]][Math.floor(rng() * 4)];
-    for (let k = 1; k <= 2; k++) {
-      const c = cx + 1 + dc * (2 + k - 1);
-      const r = cy + 1 + dr * (2 + k - 1);
-      if (c < x0 || c > x1 || r < y0 || r > y1) break;
-      if (raise(c, r)) made++;
-    }
-    vaults.push({ col: cx + 1, row: cy + 1 });
-    return made;
+    return 0;
   };
 
   /* lone blocks to hop between, and holes to hop over */
@@ -420,12 +444,14 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
   // level above for?" - and it needs the room to spare
   let reserved = -1;
   {
-    const roomy = order
-      .map((idx) => ({ idx, ...box(rooms[idx]) }))
-      .filter((b) => b.iw >= 4 && b.ih >= 4)
-      .sort((a, b) => b.iw * b.ih - a.iw * a.ih);
-    for (const b of roomy) {
-      if (vault(b.x0, b.y0, b.x1, b.y1, b.iw, b.ih) >= 3) { reserved = b.idx; made++; break; }
+    const fits = (idx) => rooms[idx].w >= 6 && rooms[idx].h >= 6;
+    const others = order.filter(fits).sort((a, b) => rooms[b].w * rooms[b].h - rooms[a].w * rooms[a].h);
+    for (const idx of others) {
+      if (vault(rooms[idx]) >= 3) { reserved = idx; made++; break; }
+    }
+    if (reserved < 0 && fits(0)) {
+      const keep = { col: rooms[0].cx, row: rooms[0].cy };
+      if (vault(rooms[0], keep) >= 3) { reserved = 0; made++; }
     }
   }
 
@@ -437,7 +463,10 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
 
     const roll = rng();
     let cells;
-    if (iw >= 4 && ih >= 4 && roll < 0.34) cells = vault(x0, y0, x1, y1, iw, ih);
+    if (rooms[idx].w >= 6 && rooms[idx].h >= 6 && roll < 0.34) {
+      const keep = idx === 0 ? { col: rooms[0].cx, row: rooms[0].cy } : null;
+      cells = vault(rooms[idx], keep);
+    }
     else if (roll < 0.55) cells = causeway(x0, y0, x1, y1, iw, ih);
     else if (roll < 0.78) cells = plateau(x0, y0, x1, y1, iw, ih);
     else cells = stepping(x0, y0, x1, y1, iw, ih);
@@ -542,7 +571,7 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
     }
   }
 
-  return { upper, holes, vaults, voids, roofs };
+  return { upper, holes, vaults, vaultRings, voids, roofs };
 }
 
 /* ------------------------------------------------------------------ level */
@@ -556,7 +585,7 @@ export function createLevel({
   // introduced are built without any of it.
   const built = wantUpper
     ? stampUpperLevel(grid, rooms, cols, rng, { startDeck })
-    : { upper: new Set(), holes: new Set(), vaults: [], voids: new Set(), roofs: new Set() };
+    : { upper: new Set(), holes: new Set(), vaults: [], vaultRings: new Set(), voids: new Set(), roofs: new Set() };
   const upper = built.upper;
   const pits = built.holes;
   // The edge of the world is a band of nothing, not a nine-metre wall. The craft
@@ -575,6 +604,7 @@ export function createLevel({
   }
   for (const key of rim) pits.add(key);
   const vaults = built.vaults;
+  const vaultRings = built.vaultRings;
   const voids = built.voids;
   const roofs = built.roofs;
   stats.upper = upper.size;
@@ -747,22 +777,27 @@ export function createLevel({
   {
     const at = (c, r) => r * cols + c;
     const reachable = (c, r) => c > 0 && r > 0 && c < cols - 1 && r < rows - 1 && dist[at(c, r)] >= 0;
-    const roomy = openCells.filter(([c, r]) => {
+    // A pad wants a 3x3 of open floor round it: room to drive on and off it from
+    // any side, which is also what lets a spent pad re-arm. Where the map is too
+    // tight for that, the four sides are the minimum.
+    const padFits = (full) => openCells.filter(([c, r]) => {
       if (!reachable(c, r)) return false;
-      // a pad may not sit under a roof, nor right beside one: the craft rises for
-      // a moment before the roofs are solid, and it must not drift under one
-      for (let dr = -1; dr <= 1; dr++) {
-        for (let dc = -1; dc <= 1; dc++) if (roofs.has(`${c + dc},${r + dr}`)) return false;
-      }
       // not right under the start pad, and a real run short of the exit, so a
       // lift is a shortcut over the guard ring rather than a step onto the goal
       if (Math.abs(c - start.col) + Math.abs(r - start.row) < 3) return false;
       if (Math.abs(c - exit.col) + Math.abs(r - exit.row) < 4) return false;
-      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (walls.has(`${c + dc},${r + dr}`)) return false;
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (!full && dc !== 0 && dr !== 0) continue; // the diagonals are the extra
+          if (walls.has(`${c + dc},${r + dr}`)) return false;
+          if (pits.has(`${c + dc},${r + dr}`)) return false;
+          if (roofs.has(`${c + dc},${r + dr}`)) return false;
+        }
       }
       return true;
     });
+    let roomy = padFits(true);
+    if (roomy.length < wantLifts) roomy = padFits(false);
     const pool = roomy.length >= wantLifts
       ? roomy
       : openCells.filter(([c, r]) => reachable(c, r) &&
@@ -947,7 +982,7 @@ export function createLevel({
 
   return {
     cols, rows, walls, ground, wallKind, wallTheme, features, rooms, stats, openCells, start, exit, lifts, upper,
-    pits, rim, voids, vaults, roofs, upperSolids,
+    pits, rim, voids, vaults, vaultRings, roofs, upperSolids,
     cellToWorldX, cellToWorldZ, hitsWall, resolve, slide,
     isBorderCell,
     // what a walker uses: a hole stops it just like a wall does

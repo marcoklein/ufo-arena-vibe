@@ -195,12 +195,13 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
   // a run stays a clear cell inside a room, so no doorway is ever pinched or a
   // room rim ever closed off
   const inRoomClear = [...L.upper].every((k) => {
+    if (L.vaultRings.has(k)) return true; // a ring may hug the wall of its room
     const [c, r] = k.split(",").map(Number);
     return L.rooms.some((room) =>
       c >= room.x + 1 && c <= room.x + room.w - 2 &&
       r >= room.y + 1 && r <= room.y + room.h - 2);
   });
-  ok(inRoomClear, `L${lvl}: runs keep one cell clear of every room edge`);
+  ok(inRoomClear, `L${lvl}: runs keep one cell clear of every room edge (vault rings excepted)`);
 
   ok(!L.upper.has(`${L.start.col},${L.start.row}`), `L${lvl}: the start cell stays open`);
   ok(!L.upper.has(`${L.exit.col},${L.exit.row}`), `L${lvl}: and so does the exit cell`);
@@ -272,18 +273,28 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
     ok(!L.holeAt(L.cellToWorldX(L.start.col), L.cellToWorldZ(L.start.row)),
       `L${lvl}: while the start pad is on solid floor`);
   }
-  // vaults: a sealed pocket with a pad in it
+  // vaults: a courtyard with a ring of blocks round it, and a pad in the middle
   for (const v of L.vaults) {
     const pad = L.lifts.find((l) => l.col === v.col && l.row === v.row && l.vault);
-    ok(!!pad, `L${lvl}: the vault pocket has a pad in it (${v.col},${v.row})`);
-    ok(!L.hitsWall(L.cellToWorldX(v.col), L.cellToWorldZ(v.row)), `L${lvl}: and the pocket itself is floor`);
-    // the floor way in is shut: every side of the pocket is rock
-    const sealed = [[1, 0], [-1, 0], [0, 1], [0, -1]]
-      .every(([dc, dr]) => L.walls.has(`${v.col + dc},${v.row + dr}`));
-    ok(sealed, `L${lvl}: a vault only opens from above`);
-  }
-  if (L.vaults.length) {
-    ok(L.vaults.every((v) => !L.upper.has(`${v.col},${v.row}`)), `L${lvl}: the pocket itself stays open`);
+    ok(!!pad, `L${lvl}: the courtyard has a pad in the middle of it (${v.col},${v.row})`);
+    // a 3x3 of open floor, with the pad in the middle: a cell of room on every
+    // side, so the craft can drive off the pad and the pad can re-arm
+    const yard = [];
+    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) yard.push([v.col + dc, v.row + dr]);
+    ok(yard.every(([c, r]) => !L.walls.has(`${c},${r}`) && !L.pits.has(`${c},${r}`)),
+      `L${lvl}: the courtyard is a 3x3 of open floor`);
+    // and the ring round it is solid: the only way in is over the top
+    const around = [];
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== 2) continue;
+        around.push([v.col + dc, v.row + dr]);
+      }
+    }
+    ok(around.every(([c, r]) => L.walls.has(`${c},${r}`) && L.wallKind.get(`${c},${r}`) === "O"),
+      `L${lvl}: a vault only opens from above`);
+    ok(around.every(([c, r]) => L.vaultRings.has(`${c},${r}`)),
+      `L${lvl}: and the ring is on record as a vault ring`);
   }
 
   // the point of the upper level: a pad has to be near enough to use it

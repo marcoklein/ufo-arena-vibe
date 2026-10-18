@@ -78,7 +78,7 @@
         const needs = {
           pad: 4, block: 4, run: 4, deck: 4, hover: 4, vault: 5, pit: 4, pitair: 4,
           warden: 6,
-          tunnel: 4, spawners: 5, holeTop: 4, edge: 1, warden: 6, lurk: 3, shade: 3, rift: 5,
+          tunnel: 4, spawners: 5, holeTop: 4, edge: 1, vaultTop: 5, warden: 6, lurk: 3, shade: 3, rift: 5,
         };
         let want = Number(q.get("level") || 0);
         if (!want) {
@@ -197,6 +197,15 @@
           if (v) { UFO.move(v.x, v.z); UFO.aim(rim.x, rim.z); }
         }
         await frames(22);
+      } else if (pose === "vaultTop") {
+        // straight down over a courtyard: the ring, the courtyard, the pad
+        const v = UFO.vaults[0];
+        if (v) {
+          const w = UFO.worldOf(v.col, v.row);
+          UFO.move(w.x, w.z);
+          UFO.cam(w.x, 20, w.z + 16, w.x, 0, w.z);
+        }
+        await frames(16);
       } else if (pose === "holeTop") {
         // straight down over a hole: the flat black square and its lip
         const h = UFO.pits[0];

@@ -810,11 +810,13 @@ function buildLiftPads(L) {
   pads = [];
   for (const cell of L.lifts) {
     const pad = buildLiftPad(L.cellToWorldX(cell.col), L.cellToWorldZ(cell.row));
+    pad.col = cell.col;
+    pad.row = cell.row;
     if (cell.vault) {
-      // the pocket is a single cell, so the pad is effectively its whole floor:
-      // it takes you up from anywhere inside, and the ring is widened to say so
+      // the pad sits in the middle of a courtyard with a cell of open floor on
+      // every side, so it is simply driven onto like any other pad
       pad.vault = true;
-      pad.r = LIFT.padR + 1.2;
+      pad.r = LIFT.padR + 0.8;
       pad.group.scale.set(1.25, 1, 1.25);
     } else {
       pad.r = LIFT.padR;
@@ -3124,10 +3126,14 @@ function updateLift(dt) {
   let near = false;
   const charged = charge >= LIFT.minCharge;
   const holeUnder = overHole();
+  const craftCell = level.cellOf(pos.x, pos.z);
   for (const p of pads) {
     p.t += dt;
-    // a used pad re-arms once you have driven off it again
-    if (p.used && lift <= 0.001 && Math.hypot(pos.x - p.x, pos.z - p.z) > LIFT.armR) p.used = false;
+    // A used pad re-arms as soon as the craft is off its cell again. Measured by
+    // cell rather than by distance, so a pad in a courtyard - where you cannot get
+    // far from it - re-arms by driving one cell aside, and can never strand you.
+    const onPad = craftCell.col === p.col && craftCell.row === p.row;
+    if (p.used && lift <= 0.001 && !onPad) p.used = false;
     const ready = !p.used && charged;
     const pulse = 0.5 + 0.5 * Math.sin(p.t * 2.6);
     p.ring.rotation.z = p.t * (ready ? 0.7 : 0.14);

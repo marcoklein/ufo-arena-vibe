@@ -772,22 +772,47 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
   ok(!pad.used, "driving off it re-arms it");
 }
 
-/* the vault: a room you can only hover into */
+/* the vault: a courtyard you can only hover into, with a pad in the middle */
 {
-  startL(4);
   startL(5);
   const v = UFO.vaults[0];
   ok(!!v, `a vault shows up on this one (${UFO.vaults.length})`);
   if (v) {
+    only(null); // nothing else gets to end this run
     const w = UFO.worldOf(v.col, v.row);
     const vp = UFO.pads.find((p) => p.vault &&
       Math.abs(p.x - w.x) < 0.01 && Math.abs(p.z - w.z) < 0.01);
-    ok(!!vp, "with a lift pad in the pocket, so the way out is inside");
-    ok(!UFO.stuckAt(w.x, w.z), "the pocket itself is open floor");
-    ok(UFO.stuckAt(w.x + 4, w.z) && UFO.stuckAt(w.x - 4, w.z) &&
-      UFO.stuckAt(w.x, w.z + 4) && UFO.stuckAt(w.x, w.z - 4),
-      "and the ring around it is solid: the only way in is over the top");
-    ok(vp && vp.r > UFO.liftCfg.padR, `the pad fills the pocket (reach ${vp && vp.r.toFixed(1)}u)`);
+    ok(!!vp, "with a lift pad in the middle of the courtyard");
+    // open floor on every side of the pad: room to drive on and off it
+    ok([[-1, 0], [1, 0], [0, -1], [0, 1]].every(([dc, dr]) =>
+      !UFO.stuckAt(w.x + dc * 4, w.z + dr * 4) && !UFO.holeAt(w.x + dc * 4, w.z + dr * 4)),
+      "and a cell of open floor on all four sides of it");
+    // the ring round the courtyard is solid
+    const ring = [];
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) {
+        if (Math.max(Math.abs(dc), Math.abs(dr)) !== 2) continue;
+        ring.push([dc, dr]);
+      }
+    }
+    ok(ring.every(([dc, dr]) => UFO.stuckAt(w.x + dc * 4, w.z + dr * 4)),
+      "and the ring round it is solid: the only way in is over the top");
+
+    // the bug this is here for: fall in, take the pad out, come back - the pad has
+    // to re-arm, or the courtyard is a trap
+    UFO.move(w.x, w.z);
+    frame(3);
+    ok(UFO.liftUp && vp.used, "driving onto the pad in the courtyard takes the craft up");
+    UFO.move(w.x + 4, w.z);   // one cell aside, still in the courtyard
+    for (let i = 0; i < 500 && UFO.lift > 0; i++) frame(1);
+    ok(UFO.lift === 0, "and it settles back down in there");
+    frame(2);
+    ok(!vp.used, "the pad re-arms as soon as the craft is off its cell");
+    // let the courtyard floor put some charge back in the meter, then try again
+    for (let i = 0; i < 300 && UFO.charge < UFO.liftCfg.minCharge + 0.3; i++) frame(1);
+    UFO.move(w.x, w.z);
+    frame(4);
+    ok(UFO.liftUp, "so the courtyard can always be left again");
   }
 }
 
