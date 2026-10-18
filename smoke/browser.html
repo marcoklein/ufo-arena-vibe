@@ -256,6 +256,35 @@
         }
       }
 
+      // ?audio=1 — the live half of the sound check in a real browser: does the
+      // engine come up on the first gesture, does the score run on its own
+      // clock, does M silence it and does the HUD say so. (What the sounds
+      // actually measure is rendered offline by smoke/audio.mjs.)
+      const audio = {};
+      if (new URLSearchParams(location.search).has("audio")) {
+        const A = UFO.audio;
+        audio.live = { enabled: A.enabled, state: A.state, level: A.level, muted: A.muted };
+        const tap = async (code, key, n = 4) => {
+          window.dispatchEvent(new KeyboardEvent("keydown", { code, key, bubbles: true }));
+          await frames(n);
+          window.dispatchEvent(new KeyboardEvent("keyup", { code, key, bubbles: true }));
+          await frames(1);
+        };
+        await tap("KeyW", "w", 8); // the first key is the gesture audio waits for
+        audio.afterGesture = { enabled: A.enabled, ctx: A.state, notes: A.stats().notes };
+        audio.arr = A.arrangement && { level: A.arrangement.level, bpm: A.arrangement.bpm, mode: A.arrangement.mode };
+        await tap("KeyM", "m", 2);
+        audio.mutedByKey = A.muted;
+        audio.hudMuted = document.getElementById("snd").textContent;
+        await tap("KeyM", "m", 2);
+        audio.unmutedByKey = A.muted;
+        audio.hudOn = document.getElementById("snd").textContent;
+        await tap("Space", " ", 40); // a burst of fire, so the mixer has work to do
+        audio.log = A.log.slice(-10);
+        audio.notes = A.stats().notes;
+        audio.voices = A.stats().step;
+      }
+
       // ?settle=N — let the level run on by itself before the probe reads it
       const settle = Number(new URLSearchParams(location.search).get("settle") || 0);
       if (settle > 0) await frames(settle);
@@ -284,7 +313,9 @@
           riftsOpened: UFO.riftsOpened,
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
+          soundTag: document.getElementById("snd") && document.getElementById("snd").textContent,
           mine,
+          audio,
         });
         document.body.appendChild(pre);
       }

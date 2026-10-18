@@ -29,6 +29,8 @@
       #hud .top { display: flex; justify-content: space-between; gap: 0.9em; }
       #lvl { color: #7dd3fc; font-weight: 700; letter-spacing: 0.06em; }
       #kills { color: #facc15; }
+      #snd { color: #93a3b8; }
+      #snd.off { color: #f87171; font-weight: 700; }
       #hpwrap {
         margin-top: 0.55em;
         height: 0.85em;
@@ -119,12 +121,12 @@
     <div id="hurt"></div>
     <div id="huntveil"></div>
     <div id="hud">
-      <div class="top"><span id="lvl">Level 1</span><span id="kills">0 kills</span></div>
+      <div class="top"><span id="lvl">Level 1</span><span id="kills">0 kills</span><span id="snd">sound on</span></div>
       <div id="hpwrap"><div id="hpbar"></div></div>
       <div id="left">0 monsters</div>
       <div id="hunt">&#9650; THE SHADE IS AWAKE &#9650;</div>
     </div>
-    <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> or <b>&larr;</b>/<b>&rarr;</b> turn &middot; <b>Space</b>/click shoot &middot; <b>R</b> restart</div>
+    <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> or <b>&larr;</b>/<b>&rarr;</b> turn &middot; <b>Space</b>/click shoot &middot; <b>M</b> sound &middot; <b>R</b> restart</div>
     <div id="overlay"><span id="ovtitle"></span><span id="ovsub"></span></div>
     <script type="module" src="./main.js"></script>
   </body>

@@ -1,7 +1,8 @@
 # Tests & tooling
 
 Everything here is test-only. The game itself is `../index.html` + `../main.js` +
-`../maze.js`, with no build step and no dependencies to install.
+`../audio.js` + `../maze.js`, with no build step and no dependencies to install.
+`../TODO.md` is the running list of what is next.
 
 Start the dev server first, then play at <http://127.0.0.1:8000>:
 
@@ -63,9 +64,35 @@ Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
+`&audio=1` (bring the audio up on a key press and report what it did),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
 
-## 5. Trusted key events — `smoke/cdp.mjs`
+## 5. Sound — `smoke/audio.mjs` (+ `smoke/audio.html`)
+
+The score and every effect are synthesised at runtime (see `../audio.js`): no
+sample library, no engine, nothing downloaded. Two layers check it:
+
+```js
+node smoke/audio.mjs          # measure levels, panning, mute, and the live game
+node smoke/audio.mjs --json   # the same numbers, raw
+```
+
+It renders the real voices through an `OfflineAudioContext` and reports RMS and
+peak per sound, per level, for each channel — so "is it audible, does it change
+per level, does the pan work, does mute silence it" are all numbers, not opinions.
+Then it opens the **real game** in a real Chrome over the DevTools protocol,
+presses a key for the autoplay gesture, and samples the mixer's master bus in
+real time to prove that sound actually leaves the game.
+
+This one drives Chrome over CDP rather than using `--dump-dom` with a virtual
+time budget: the virtual clock fast-forwards to the end of the budget while the
+audio thread is still rendering, so the page gets dumped mid-measurement.
+
+`&audio=1` in `smoke/browser.html` is the live half that does fit the
+`--dump-dom` style: does the engine come up on a gesture, does the score run on
+its own clock, does `M` silence it and does the HUD say so.
+
+## 6. Trusted key events — `smoke/cdp.mjs`
 
 Synthetic `KeyboardEvent`s never touch the browser's own key handling, so they
 cannot reproduce a key the browser swallows before the page sees it. This drives
@@ -81,7 +108,7 @@ It prints the events the page received, the held-key set and the yaw swing, whic
 is how the "left arrow while holding space" report was pinned down to the
 keyboard's rollover rather than the game.
 
-## 6. Level map — `smoke/map.html`
+## 7. Level map — `smoke/map.html`
 
 Draws the generated layout flat so the shape of a level can be judged at a
 glance: rooms outlined in their theme colour, corridors in grey, dead ends
@@ -103,6 +130,12 @@ UFO.level, UFO.hp, UFO.kills, UFO.monsters, UFO.state
 UFO.enemies, UFO.bullets, UFO.pos, UFO.exit, UFO.yaw
 UFO.rooms, UFO.props, UFO.stats, UFO.explosions, UFO.particles
 UFO.shades, UFO.hunted, UFO.rifts, UFO.riftsOpened, UFO.debris, UFO.splats, UFO.keys
-UFO.mine, UFO.blastAt(d)
+UFO.mine, UFO.blastAt(d), UFO.audio
 UFO.move(x, z), UFO.aim(x, z), UFO.damage(n), UFO.kill(), UFO.killPlayer(), UFO.stuckAt(x, z)
+
+// sound
+UFO.audio.state, UFO.audio.muted, UFO.audio.log, UFO.audio.arrangement
+UFO.audio.stats()            // context state, level, hunt, voices written
+UFO.audio.peak()             // loudest sample on the master bus in the last ~46ms
+UFO.audio.toggleMute(), UFO.audio.sfx(name, { x, z }), UFO.audio.music({ level })
 ```

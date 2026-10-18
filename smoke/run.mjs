@@ -360,17 +360,94 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.kills > k0, "though you do get the credit for it");
 }
 
+/* sound: there is no Web Audio in node, so the engine stays off and only logs
+   what the game asked it to play. That log is the whole wiring test. */
+{
+  const a = UFO.audio;
+  ok(!!a, "the audio engine is on the debug handle");
+  ok(a.state === "off" && !a.enabled, `no Web Audio here, so it stays off (${a.state})`);
+  ok(a.level === 1, `and it is scoring level 1 (${a.level})`);
+  ok(a.arrangement && a.arrangement.bpm > 0, `level 1 has a tempo (${a.arrangement && a.arrangement.bpm})`);
+
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  a.clear();
+
+  /* your own gun, and the hull taking one */
+  down("Space");
+  frame(3);
+  up("Space");
+  ok(a.log.includes("shoot"), `firing asks for a shot (${a.log.slice(-4).join(",")})`);
+  UFO.damage(5);
+  ok(a.log.includes("hurt"), "taking a hit asks for a hurt");
+  ok(UFO.hp === 95, `and the hit still lands (${UFO.hp})`);
+
+  /* things coming apart */
+  a.clear();
+  UFO.kill();
+  const heard = [...new Set(a.log)];
+  ok(a.log.includes("kill"), `destroying monsters asks for a kill (${heard.join(",")})`);
+  ok(a.log.includes("killShade"), "and the shade gets its own, lower one");
+
+  /* the mine, in order: latch, then beeps, then the bang */
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  a.clear();
+  const loudMine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+  UFO.move(loudMine.x + 1, loudMine.z);
+  for (let i = 0; i < 30 && !loudMine.armed; i++) frame(1);
+  ok(a.log.includes("mineArm"), "arming a mine asks for the latch");
+  for (let i = 0; i < 200 && !loudMine.dead; i++) frame(1);
+  ok(a.log.includes("mineBeep"), "the fuse counts down audibly");
+  ok(a.log.includes("boom"), "and the detonation asks for the big one");
+  ok(a.log.indexOf("mineArm") < a.log.indexOf("mineBeep"), "the latch comes before the beeps");
+  ok(a.log.indexOf("mineBeep") < a.log.indexOf("boom"), "and the beeps before the bang");
+
+  /* one key mutes everything, and the HUD says which way it is */
+  const wasMuted = a.muted;
+  down("KeyM");
+  up("KeyM");
+  ok(a.muted === !wasMuted, `M flips the mute (muted: ${a.muted})`);
+  ok(document.getElementById("snd").textContent.includes("off") === a.muted, "and the HUD repeats it");
+  down("KeyM");
+  up("KeyM");
+  ok(a.muted === wasMuted, "and M flips it back");
+
+  /* a shade waking up dresses the score up */
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  a.clear();
+  const loudShade = UFO.shades.find((e) => !e.dead);
+  if (loudShade) {
+    UFO.move(loudShade.x + 18, loudShade.z);
+    for (let i = 0; i < 40 && !a.hunted; i++) frame(1);
+    ok(a.hunted === true, "a waking shade switches the score into hunt mode");
+    ok(a.log.includes("shadeWake"), `and you hear it wake (${[...new Set(a.log)].join(",")})`);
+  }
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+}
+
 /* reaching the exit clears the level and advances it */
 {
+  UFO.audio.clear();
   const w = UFO.worldOf(UFO.exit.col, UFO.exit.row);
   UFO.move(w.x, w.z);
   frame(2);
   ok(UFO.state === "cleared", "standing on the exit clears the level");
   ok(UFO.explosions > 0, `the exit answers with a blast (${UFO.explosions} active)`);
+  ok(UFO.audio.log.includes("exit"), "and the exit asks for its jingle");
   frame(140);
   ok(UFO.level === 2, `advanced to level 2 (got ${UFO.level})`);
   ok(UFO.monsters === 14, `level 2 spawns 14 monsters (got ${UFO.monsters})`);
   ok(UFO.hp === 100, "health is restored on a new level");
+  ok(UFO.audio.level === 2, `and the score moves to level 2 (${UFO.audio.level})`);
+  ok(UFO.audio.arrangement.level === 2 && UFO.audio.arrangement.bpm > 0, "with its own arrangement");
+  ok(UFO.audio.log.includes("levelUp"), "and a sting on the way in");
 }
 
 /* sustained random play must never wedge the craft into a wall */

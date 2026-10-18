@@ -3,6 +3,7 @@ smoke/out/
 
 # scratch chrome profiles used by the browser probes
 smoke/.chrome-profile/
+smoke/.chrome-profile-audio/
 smoke/.cache/
 
 # macOS

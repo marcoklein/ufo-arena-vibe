@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { CELL, RADIUS, createLevel, makeRng } from "./maze.js";
 import { THEMES } from "./themes.js";
+import { gameAudio } from "./audio.js";
 
 /* ------------------------------------------------------------------ config */
 const SPEED = 16;        // forward speed, units/second
@@ -1526,6 +1527,7 @@ function wakeShade(e) {
   e.state = "wake";
   e.wakeT = e.wakeDur;
   spawnBurst(e.x, 1.2, e.z, BOOM.shadeWake());
+  gameAudio.sfx("shadeWake", { x: e.x, z: e.z });
   shake = Math.min(1.6, shake + 0.75);
   hurtFlash = Math.min(1, hurtFlash + 0.22);
 }
@@ -1613,6 +1615,7 @@ function stepShade(e, dt) {
       e.cdz = uz;
       e.trailT = 0;
       spawnBurst(e.x, 1.2, e.z, BOOM.shadeWake());
+      gameAudio.sfx("shadeCharge", { x: e.x, z: e.z });
       shake = Math.min(1.6, shake + 0.5);
     }
   } else if (e.state === "charge") {
@@ -1773,6 +1776,7 @@ function openRift(rf) {
   e.fromRift = true;
   enemies.push(e);
   spawnBurst(rf.x, 1.1, rf.z, BOOM.rift());
+  gameAudio.sfx("rift", { x: rf.x, z: rf.z });
   const d = Math.hypot(pos.x - rf.x, pos.z - rf.z);
   if (d < 22) shake = Math.min(1.3, shake + 0.32 * (1 - d / 22));
 }
@@ -1863,6 +1867,13 @@ const held = (...names) => names.some((n) => keys.has(n));
 
 addEventListener("keydown", (e) => {
   const names = keyAliases(e);
+  // the very first key press is the gesture the browser wants before it lets
+  // anything make a sound
+  gameAudio.unlock();
+  if (names.has("KeyM") || names.has("m") || names.has("M")) {
+    if (!e.repeat) toggleSound();
+    return;
+  }
   if (names.has("KeyR") || names.has("r") || names.has("R")) {
     if (!e.repeat) {
       if (state === "dead") restartGame();
@@ -1879,6 +1890,7 @@ addEventListener("keyup", (e) => { for (const n of keyAliases(e)) keys.delete(n)
 addEventListener("blur", () => { keys.clear(); mouseDown = false; });
 renderer.domElement.addEventListener("pointerdown", (e) => {
   mouseDown = true;
+  gameAudio.unlock();
   if (e.cancelable) e.preventDefault();
 });
 addEventListener("pointerup", () => { mouseDown = false; });
@@ -1889,6 +1901,7 @@ const el = {
   level: document.getElementById("lvl"),
   kills: document.getElementById("kills"),
   left: document.getElementById("left"),
+  snd: document.getElementById("snd"),
   hp: document.getElementById("hpbar"),
   overlay: document.getElementById("overlay"),
   ovTitle: document.getElementById("ovtitle"),
@@ -1939,6 +1952,18 @@ function showOverlay(title, sub) {
 }
 function hideOverlay() {
   el.overlay.classList.remove("show");
+}
+
+/* sound: one key, and the setting sticks. The HUD says which way it is. */
+function updateSoundHud() {
+  const off = gameAudio.muted;
+  el.snd.textContent = off ? "sound off" : "sound on";
+  if (off) el.snd.classList.add("off");
+  else el.snd.classList.remove("off");
+}
+function toggleSound() {
+  gameAudio.toggleMute();
+  updateSoundHud();
 }
 
 function startLevel(n) {
@@ -2019,6 +2044,10 @@ function startLevel(n) {
 
   hideOverlay();
   updateHud();
+  updateSoundHud();
+  // the score is composed per level: new key, new tempo, more going on
+  gameAudio.music({ level: n, state: "playing" });
+  if (n > 1) gameAudio.sfx("levelUp");
 }
 
 function restartGame() {
@@ -2030,6 +2059,8 @@ function killPlayer() {
   if (state !== "playing") return;
   hp = 0;
   state = "dead";
+  gameAudio.sfx("death");
+  gameAudio.music({ state: "dead" });
   blowUpPlayer();
   // and it comes apart: hull plates, glowing coolant, embers
   spawnDebris(pos.x, HOVER, pos.z, {
@@ -2052,6 +2083,7 @@ function hurtPlayer(dmg, { pierce = false } = {}) {
   hurtT = HURT_COOLDOWN;
   hurtFlash = Math.min(1, hurtFlash + 0.5 + dmg * 0.02);
   shake = Math.min(1.2, shake + 0.16);
+  gameAudio.sfx("hurt");
   if (hp <= 0) killPlayer();
 }
 
@@ -2061,6 +2093,7 @@ function killEnemy(e, { credit = true, quiet = false } = {}) {
   enemyGroup.remove(e.group);
   if (credit) GAME.kills++;
   if (!quiet) {
+    gameAudio.sfx(e.type === "lurker" ? "killShade" : "kill", { x: e.x, z: e.z });
     if (e.type === "lurker") {
       spawnBurst(e.x, 1.2, e.z, BOOM.shade());
       spawnDebris(e.x, 1.2, e.z, { palette: "shade", count: 16, speed: 15, lift: 11, spread: 1, life: 11 });
@@ -2090,10 +2123,12 @@ function armMine(e) {
   if (e.armed || e.dead) return;
   e.armed = true;
   e.fuse = MINE.fuse;
+  e.beepT = 0.32;              // the first beep lands just after the chirp
   e.mine.ring.visible = true;
   e.mine.dome.visible = true;
   spawnBurst(e.x, 1.0, e.z, BOOM.arm());
   shake = Math.min(1.4, shake + 0.35);
+  gameAudio.sfx("mineArm", { x: e.x, z: e.z });
 }
 
 function detonateMine(e, { credit = false } = {}) {
@@ -2103,6 +2138,7 @@ function detonateMine(e, { credit = false } = {}) {
   killEnemy(e, { credit, quiet: true });
   spawnBurst(e.x, 1.0, e.z, BOOM.mine());
   spawnDebris(e.x, 1.0, e.z, { palette: "blast", count: 20, speed: 20, lift: 14, spread: 1.2, life: 13 });
+  gameAudio.sfx("boom", { x: e.x, z: e.z });
   const dmg = blastDamage(d);
   if (dmg > 0) {
     hurtFlash = Math.min(1, hurtFlash + 0.3);
@@ -2125,6 +2161,12 @@ function stepMine(e, dt) {
     // planted, swelling, blinking: the fuse is the whole point
     e.fuse -= dt;
     const k = 1 - Math.max(0, e.fuse) / MINE.fuse;
+    // and the fuse counts down out loud: the beeps quicken and climb
+    e.beepT -= dt;
+    if (e.beepT <= 0) {
+      e.beepT = 0.55 - k * 0.42;
+      gameAudio.sfx("mineBeep", { x: e.x, z: e.z, pitch: k });
+    }
     const blink = 0.5 + 0.5 * Math.sin(e.t * (13 + k * 46));
     const swell = 1 + k * 0.5 + blink * 0.05;
     e.mine.hull.scale.setScalar(swell);
@@ -2171,6 +2213,7 @@ function tryFire() {
     fx * BULLET_SPEED, fz * BULLET_SPEED, BULLET_LIFE, 1);
   ufoMuzzle.visible = true;
   muzzleT = 0.06;
+  gameAudio.sfx("shoot");
 }
 
 /* ------------------------------------------------------------------- step */
@@ -2263,6 +2306,7 @@ function updateEnemies(dt) {
       if (e.fireT <= 0) {
         e.fireT = e.fireRate * (0.7 + decor() * 0.6);
         addBullet(eBullets, enemyBulletMat, e.x + ux, 1.1, e.z + uz, ux * 22, uz * 22, 2.6, 8);
+        gameAudio.sfx("enemyShot", { x: e.x, z: e.z });
       }
     } else {
       idleStep(e, dt);
@@ -2295,6 +2339,7 @@ function updateBullets(dt) {
         if (Math.hypot(e.x - b.x, e.z - b.z) < (e.r || ENEMY_R) + BULLET_R) {
           e.hp -= b.dmg;
           e.hitT = 0.12;
+          gameAudio.sfx("hit", { x: e.x, z: e.z });
           // a mine that has already latched on goes off where it stands, so
           // shooting the blinking thing next to you is not a way out
           if (e.hp <= 0) {
@@ -2344,6 +2389,7 @@ function checkExit() {
     state = "cleared";
     clearedT = 0;
     spawnBurst(ex, 1.4, ez, BOOM.exit());
+    gameAudio.sfx("exit");
     shake = Math.min(1.3, shake + 0.5);
     later(0.85, () => {
       if (state !== "cleared") return;
@@ -2373,6 +2419,7 @@ function updateHunt(dt) {
   }
   if (any !== hunted) {
     hunted = any;
+    gameAudio.hunt(any);
     el.hunt.style.display = any ? "block" : "none";
     if (any) shake = Math.min(1.5, shake + 0.45);
   }
@@ -2462,6 +2509,7 @@ globalThis.UFO = {
   get hunted() { return hunted; },
   get mine() { return MINE; },
   blastAt: (d) => blastDamage(d),
+  get audio() { return gameAudio; },
   killPlayer,
   get exit() { return level.exit; },
   get rooms() { return level.rooms; },
@@ -2485,6 +2533,8 @@ startLevel(1);
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.05);
+  // where the ears are, before anything this frame wants to be heard
+  gameAudio.listener(pos.x, pos.z, yaw);
 
   if (state === "playing") {
     step(dt);

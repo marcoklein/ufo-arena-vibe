@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>UFO Arena — audio bench</title>
+  </head>
+  <body>
+    <pre id="probe">idle</pre>
+    <script type="module">
+      // A bench for the offline renderer: nothing here makes a sound, it just
+      // hands the real voices to smoke/audio.mjs over the DevTools protocol so
+      // they can be rendered and measured (see the runner for the numbers).
+      import { gameAudio, measure } from "../audio.js";
+      window.GAME_AUDIO = gameAudio;
+      window.MEASURE = measure;
+      window.BENCH = { ready: true, hasOffline: typeof OfflineAudioContext === "function" };
+      document.getElementById("probe").textContent = "ready";
+    </script>
+  </body>
+</html>
