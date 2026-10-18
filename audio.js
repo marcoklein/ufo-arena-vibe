@@ -302,6 +302,17 @@ const SFX = {
     noiseHit(rig, t, { dur: 0.4, peak: 0.3, lp: 1600, sweep: 140, ...o });
     tone(rig, t, { type: "triangle", f0: 220, f1: 140, dur: 0.2, peak: 0.1, spread: 40, ...o });
   },
+  // a warden glob bursting on the hull: wet, and the hover going with it
+  globHit(rig, t, o) {
+    noiseHit(rig, t, { dur: 0.24, peak: 0.28, lp: 950, sweep: 180, ...o });
+    tone(rig, t, { type: "sine", f0: 320, f1: 68, dur: 0.34, peak: 0.24, a: 0.003, ...o });
+    tone(rig, t + 0.02, { type: "square", f0: 940, f1: 230, dur: 0.16, peak: 0.08, ...o });
+  },
+  // the shade losing you: the growl going back down
+  shadeSettle(rig, t, o) {
+    tone(rig, t, { type: "sawtooth", f0: 132, f1: 58, dur: 1.1, peak: 0.17, a: 0.04, ...o });
+    noiseHit(rig, t, { dur: 1.2, peak: 0.12, lp: 360, sweep: 120, ...o });
+  },
   // a warden opening its eye: stone grinding, and a whine coming up
   wardenWake(rig, t, o) {
     noiseHit(rig, t, { dur: 0.7, peak: 0.3, bp: 700, sweep: 1600, q: 1.4, ...o });

@@ -41,9 +41,12 @@ const MINE = {
   dmg: PLAYER_HP * 0.2,
 };
 
-/* the shade: a corner-crawler that ends the run the moment it touches you */
+/* the shade: a corner-crawler that ends the run the moment it touches you. It
+   gives up once you are properly out of reach, so it never trails you for ever. */
 const LURK = {
   wake: 21,          // distance at which it stirs
+  leash: 34,         // beyond this it loses interest...
+  giveUp: 0.8,       // ...after this long out there
   stalkSpeed: 4.6,   // the slow, inevitable approach
   chargeSpeed: 23,   // then the lunge
   chargeDist: 12,
@@ -120,6 +123,9 @@ const WARDEN = {
   rate: 2.2,        // seconds between globs
   shotSpeed: 15,
   dmg: 9,
+  drain: 1.1,       // a glob drinks this much hover on top of the damage
+  knock: 30,        // and throws the craft back at this speed...
+  knockDecay: 5.5,  // ...bleeding away over about half a second
   r: 0.95,
   top: BLOCK_H + 0.62, // where it sits: on the block top
 };
@@ -1221,7 +1227,7 @@ function addBullet(list, kind, x, y, z, vx, vz, life, dmg, level = 0) {
   glow.scale.setScalar(isGlob ? 1.6 : isSeed ? 1.3 : 0.85);
   mesh.add(glow);
   bulletGroup.add(mesh);
-  list.push({ x, y, z, vx, vz, life, dmg, mesh, seed: isSeed, level });
+  list.push({ x, y, z, vx, vz, life, dmg, mesh, kind, seed: isSeed, level });
 }
 
 /* ------------------------------------------------------------- explosions */
@@ -1385,6 +1391,11 @@ const BOOM = {
     color: 0x8fa8bd, hot: 0xe8f4ff, count: 26, speed: 9, size: 0.6, life: 0.7,
     gravity: 6, shock: 2.8, blending: "normal",
   }),
+  // a warden's glob bursting on the hull
+  glob: () => ({
+    color: 0x9dff3c, hot: 0xeaffc0, count: 22, speed: 10, size: 0.6, life: 0.55,
+    gravity: 5, drag: 4, spread: 0.4,
+  }),
   // a bullet puckering out against rock
   spark: () => ({
     color: 0x8fc6ff, hot: 0xffffff, count: 7, speed: 9, size: 0.24,
@@ -1441,6 +1452,72 @@ const BOOM = {
     life: 0.7, gravity: 13, drag: 3.4, spread: 0.9, blending: "normal",
   }),
 };
+
+/* --------------------------------------------------- the hover thruster */
+// Rings pushed down out of the hull and a flare under it - but only while the
+// craft is actually holding itself up on its own. Stand on a block top and it all
+// stops, so "am I spending energy?" is something you can see, not read.
+const hoverFx = new THREE.Group();
+rig.add(hoverFx);
+
+const hoverRingGeo = new THREE.RingGeometry(0.55, 0.78, 28);
+const hoverRings = [0, 1, 2].map(() => {
+  const ring = new THREE.Mesh(hoverRingGeo, new THREE.MeshBasicMaterial({
+    color: 0x8ff6ff, transparent: true, opacity: 0, side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = -0.45;
+  hoverFx.add(ring);
+  return ring;
+});
+
+const hoverFlare = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: sparkTex, color: 0x9df6ff, transparent: true, opacity: 0.9,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+}));
+hoverFlare.scale.setScalar(1.9);
+hoverFlare.position.y = -0.55;
+hoverFx.add(hoverFlare);
+
+const hoverArcMat = new THREE.MeshBasicMaterial({
+  color: 0xd6fbff, transparent: true, opacity: 0.6,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+});
+const hoverArcGeo = new THREE.TorusGeometry(0.92, 0.028, 6, 20, Math.PI * 1.15);
+const hoverArcs = [0, 1].map((i) => {
+  const arc = new THREE.Mesh(hoverArcGeo, hoverArcMat);
+  arc.rotation.x = Math.PI / 2;
+  arc.position.y = -0.3;
+  arc.rotation.z = i * Math.PI;
+  hoverFx.add(arc);
+  return arc;
+});
+hoverFx.visible = false;
+
+function updateHoverFx(t) {
+  // the hover is the only time it is spending energy on staying up
+  const spending = (lift > 0.06 || liftUp) && !onBlockLevel();
+  hoverFx.visible = spending;
+  if (!spending) return;
+
+  // the meter is the strain: emptier means working harder
+  const strain = 1 - clamp01(charge / LIFT.time);
+  const period = 0.5 - strain * 0.16;
+  for (let i = 0; i < hoverRings.length; i++) {
+    const k = ((t / period) + i / hoverRings.length) % 1;
+    const ring = hoverRings[i];
+    ring.scale.setScalar(0.75 + k * 1.8);
+    ring.position.y = -0.42 - k * 0.85;
+    ring.material.opacity = (1 - k) * (0.4 + strain * 0.3);
+  }
+  const pulse = 0.5 + 0.5 * Math.sin(t * (16 + strain * 12));
+  hoverFlare.scale.setScalar(1.55 + pulse * 0.5 + strain * 0.5);
+  hoverFlare.material.opacity = 0.4 + pulse * 0.25 + strain * 0.25;
+  hoverArcs[0].rotation.z = t * (3.4 + strain * 3);
+  hoverArcs[1].rotation.z = Math.PI - t * (2.6 + strain * 2.4);
+  hoverArcMat.opacity = 0.35 + strain * 0.45;
+}
 
 function blowUpPlayer() {
   spawnBurst(pos.x, HOVER, pos.z, BOOM.player());
@@ -1853,6 +1930,25 @@ function stepShade(e, dt) {
   const uz = dz / d;
   e.t += dt;
   e.hitT = Math.max(0, e.hitT - dt);
+
+  // out of reach for long enough and it loses you: back to a shadow where it is,
+  // instead of trailing the craft across the whole level
+  if (e.state !== "lurk") {
+    if (d > LURK.leash) {
+      e.offT = (e.offT || 0) + dt;
+      if (e.offT > LURK.giveUp) {
+        e.state = "lurk";
+        e.offT = 0;
+        e.group.position.set(e.x, 0.7, e.z);
+        e.ringMat.opacity = 0;
+        e.ring.scale.setScalar(1);
+        spawnBurst(e.x, 0.8, e.z, BOOM.shadeSmoke());
+        gameAudio.sfx("shadeSettle", { x: e.x, z: e.z });
+      }
+    } else {
+      e.offT = 0;
+    }
+  }
 
   const pulse = 0.5 + 0.5 * Math.sin(e.t * 3.6 + e.phase);
   const awake = e.state !== "lurk";
@@ -2296,6 +2392,8 @@ let charge = LIFT.time; // the hover meter, in seconds
 let liftWarned = 0;    // which warning has fired
 let liftHudState = ""; // "off" | "near" | "hover" | "block"
 let liftDenyT = 0;     // HUD flash when the guns are asked for mid-hover
+let shoveX = 0;        // a glob hit throwing the craft, in units/second
+let shoveZ = 0;
 let pads = [];
 let wallTop = new Map();
 
@@ -2386,6 +2484,8 @@ function startLevel(n) {
   pos.set(level.cellToWorldX(level.start.col), HOVER, level.cellToWorldZ(level.start.row));
   lift = 0;
   liftUp = false;
+  shoveX = 0;
+  shoveZ = 0;
   charge = LIFT.time;
   liftWarned = 0;
   liftDenyT = 0;
@@ -2822,6 +2922,8 @@ function updateUfo(dt, thrust, turn) {
   playerLight.position.set(pos.x, rigY + 0.55, pos.z);
   glow.position.set(pos.x, rigY + 0.5, pos.z);
 
+  updateHoverFx(bobT);
+
   // where it would come down, marked on the floor (or on the roof) below
   dropRing.visible = lift > 0.03;
   if (dropRing.visible) {
@@ -2855,6 +2957,19 @@ function step(dt) {
     const r = level.slide(pos.x, pos.z, fx * thrust * sp * dt, fz * thrust * sp * dt, RADIUS, overWalls);
     pos.x = r.x;
     pos.z = r.z;
+  }
+
+  // and a knockback, which bleeds away on its own
+  if (Math.abs(shoveX) + Math.abs(shoveZ) > 0.02) {
+    const r = level.slide(pos.x, pos.z, shoveX * dt, shoveZ * dt, RADIUS, overWalls);
+    pos.x = r.x;
+    pos.z = r.z;
+    const k = Math.exp(-WARDEN.knockDecay * dt);
+    shoveX *= k;
+    shoveZ *= k;
+  } else {
+    shoveX = 0;
+    shoveZ = 0;
   }
 
   updateUfo(dt, thrust, turn);
@@ -2972,7 +3087,18 @@ function updateBullets(dt) {
     const skip = b.level === 1 ? overLowWalls : null;
     if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip)) { kill = true; hitRock = true; }
     if (!kill && b.level === craftLevel() && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
-      hurtPlayer(b.dmg);
+      if (b.kind === "glob") {
+        // a glob does not only bite: it drinks the hover and throws the craft
+        hurtPlayer(b.dmg);
+        charge = Math.max(0, charge - WARDEN.drain);
+        const v = Math.hypot(b.vx, b.vz) || 1;
+        shoveX = (b.vx / v) * WARDEN.knock;
+        shoveZ = (b.vz / v) * WARDEN.knock;
+        spawnBurst(b.x, b.y, b.z, BOOM.glob());
+        gameAudio.sfx("globHit");
+      } else {
+        hurtPlayer(b.dmg);
+      }
       kill = true;
     }
     if (hitRock) spawnBurst(b.x, b.y, b.z, BOOM.spark());
@@ -3108,6 +3234,7 @@ globalThis.UFO = {
   get keys() { return [...keys]; },
   get shades() { return enemies.filter((e) => e.type === "lurker"); },
   get wardens() { return enemies.filter((e) => e.type === "warden"); },
+  get hoverFx() { return hoverFx; },
   get levelNow() { return craftLevel(); },
   get rifts() { return rifts; },
   get riftsOpened() { return riftsOpened; },

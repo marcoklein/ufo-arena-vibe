@@ -159,6 +159,13 @@
             if (w.warden && w.warden.eyeMat.emissiveIntensity > 4) break;
           }
         }
+      } else if (pose === "hover") {
+        // up on the block level over open floor, meter running: thruster lit
+        const p = UFO.pads[0];
+        UFO.move(p.x, p.z);
+        await frames(40);
+        for (let i = 0; i < 260 && UFO.charge > 0.8; i++) await frames(1);
+        await frames(2);
       } else if (pose === "mine") {
         // an armed-adjacent look at one mine from outside its arming range
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");

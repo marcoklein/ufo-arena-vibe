@@ -500,6 +500,12 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.lift === 1, "exactly one level up, no more");
   ok(Math.abs(UFO.alt - cfg.alt) < 1e-6, `which is one low block high (${UFO.alt})`);
 
+  // the thruster says out loud when it is paying to stay up
+  ok(UFO.hoverFx.visible, "holding itself up over open floor, the thruster is lit");
+  const ringA = UFO.hoverFx.children[0].scale.x;
+  frame(4);
+  ok(UFO.hoverFx.children[0].scale.x !== ringA, "and the rings are running under the hull");
+
   // over open floor there is no ground at that level: hovering costs
   const c0 = UFO.charge;
   frame(40);
@@ -513,6 +519,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(2);
   ok(UFO.onBlock, "on a block the craft has ground underneath");
   ok(/BLOCK LEVEL/.test(els.liftlab.textContent), `and the HUD says so (${els.liftlab.textContent})`);
+  ok(!UFO.hoverFx.visible, "on a block top it costs nothing, so the thruster is off");
   const c1 = UFO.charge;
   frame(40);
   ok(UFO.charge > c1, `the meter fills again up there (${c1.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
@@ -559,6 +566,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(warned, "with a warning before it drops");
   ok(audio.log.includes("liftFall") && audio.log.includes("liftLand"), "and a fall and a touchdown to go with it");
   ok(!UFO.stuck, "landing off the wall tops rather than inside them");
+  ok(!UFO.hoverFx.visible, "and the thruster is out on the floor");
   ok(!/HOVER \d/.test(els.liftlab.textContent), `and the hover clock is gone (${els.liftlab.textContent})`);
 
   // on the floor it fills back up
@@ -619,6 +627,8 @@ ok(!UFO.stuck, "player starts outside the walls");
 
     let glob = null;
     const hpBefore = UFO.hp;
+    const chargeBefore = UFO.charge;
+    const posBefore = { x: UFO.pos.x, z: UFO.pos.z };
     for (let i = 0; i < 220 && !glob; i++) {
       frame(1);
       glob = UFO.eBullets.find((b) => b.level === 1);
@@ -630,6 +640,12 @@ ok(!UFO.stuck, "player starts outside the walls");
         `the glob flies at the craft's level (${glob.y})`);
       for (let i = 0; i < 120 && UFO.hp === hpBefore; i++) frame(1);
       ok(UFO.hp < hpBefore, `and it hurts up there (${hpBefore} -> ${UFO.hp})`);
+      ok(UFO.charge < chargeBefore - 0.5,
+        `and it drinks the hover (${chargeBefore.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
+      frame(30);
+      const flung = Math.hypot(UFO.pos.x - posBefore.x, UFO.pos.z - posBefore.z);
+      ok(flung > 0.8, `and throws the craft back (${flung.toFixed(1)}u)`);
+      ok(UFO.audio.log.includes("globHit"), "with a splat to go with it");
     }
 
     // and it can be shot from its own level
@@ -639,6 +655,31 @@ ok(!UFO.stuck, "player starts outside the walls");
     for (let i = 0; i < 70 && !w.dead && w.hp === hpW; i++) frame(1);
     up("Space");
     ok(w.dead || w.hp < hpW, `a bolt up there reaches it (${hpW} -> ${w.dead ? "dead" : w.hp})`);
+  }
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+}
+
+/* a shade does not trail you for ever: out of reach, it goes back to sleep */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  const shade = UFO.shades.find((e) => !e.dead);
+  if (shade) {
+    UFO.move(shade.x + 16, shade.z);
+    for (let i = 0; i < 200 && shade.state === "lurk"; i++) frame(1);
+    ok(shade.state !== "lurk", `getting close wakes it (${shade.state})`);
+    ok(UFO.hunted, "and the run knows it");
+    ok(els.hunt.style.display === "block", "the HUD shouts about it");
+
+    UFO.move(shade.x + 70, shade.z + 45);
+    for (let i = 0; i < 200 && shade.state !== "lurk"; i++) frame(1);
+    ok(shade.state === "lurk", "out of reach it goes back to being a shadow");
+    ok(!UFO.hunted, "and the hunt is off");
+    ok(els.hunt.style.display === "none", "the HUD banner goes with it");
+    ok(UFO.audio.log.includes("shadeSettle"), "and you hear it lose you");
   }
   down("KeyR");
   up("KeyR");
