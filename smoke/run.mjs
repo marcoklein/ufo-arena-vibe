@@ -1211,6 +1211,8 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
     const small = UFO.rooms.filter((r) => r.w <= 6 && r.h <= 6).length;
     ok(small >= UFO.rooms.length - 2, `and almost all of them small (${small} of ${UFO.rooms.length})`);
     ok(UFO.monsters > 0 && UFO.rifts.length > 0, "with the usual monsters in it");
+    ok(UFO.rooms[0].w >= 8 && UFO.rooms[0].h >= 8,
+      `and the room you start in is still big enough for the camera (${UFO.rooms[0].w}x${UFO.rooms[0].h})`);
   }
 
   // roofed in: every corridor is a tunnel, so the level above is closed
