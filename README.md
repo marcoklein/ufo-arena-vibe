@@ -99,6 +99,7 @@ that the tests enforce — among them *monsters never change properties per leve
 | `save.js` | the save file (localStorage, with a memory fallback) |
 | `test.mjs`, `smoke/` | the test suites and the headless harness |
 | `PLAN.md` | the original plan for the project (it still calls the craft a *sphere*; the game grew past it) |
+| `PLAN-multiplayer.md` | the plan for co-op multiplayer (WebSocket first, WebRTC later) and the co-op rules |
 
 ## Licence
 
