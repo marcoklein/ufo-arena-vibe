@@ -2,7 +2,6 @@
 
 Everything here is test-only. The game itself is `../index.html` + `../main.js` +
 `../audio.js` + `../maze.js`, with no build step and no dependencies to install.
-`../TODO.md` is the running list of what is next.
 
 Start the dev server first, then play at <http://127.0.0.1:8000>:
 
