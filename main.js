@@ -76,16 +76,16 @@ const BLOCK_H = 2.6;
    back down. */
 const LIFT = {
   alt: BLOCK_H,     // one level: exactly the height of a low block
-  time: 4.2,        // seconds of hover in a full meter
+  time: 2.8,        // seconds of hover in a full meter
   drain: 1,         // meter per second while there is no ground underneath
-  regen: 1.2,       // and how fast it fills on the ground
-  minCharge: 0.9,   // no pad will lift you on less than this
-  rise: 0.45,       // climb time
-  fall: 0.4,        // and back down: the round trip is short on purpose
+  regen: 1.6,       // and how fast it fills on the ground
+  minCharge: 0.6,   // no pad will lift you on less than this
+  rise: 0.4,        // climb time
+  fall: 0.35,       // and back down: the round trip is short on purpose
   speed: 1.25,      // speed while up on the block level
   padR: 2.1,        // drive this close to a charged pad and it takes you up
   armR: 4.5,        // drive this far off a used pad and it re-arms
-  warn: 1.2,        // the last stretch: the HUD and the drop marker go red
+  warn: 0.8,        // the last stretch: the HUD and the drop marker go red
   safe: 0.45,       // above this the floor cannot reach you
   fly: 0.85,        // above this the blocks are underneath, not in the way
 };
@@ -105,6 +105,24 @@ const levelGuards = (n) => Math.min(12, 2 + n);       // defenders ringing the e
 const levelLurkers = (n) => Math.min(4, 1 + Math.floor((n - 1) / 2)); // shades
 const levelRifts = (n) => Math.min(8, 3 + Math.floor(n / 2));         // spawn points
 const levelLifts = (n) => Math.min(6, 2 + Math.floor((n - 1) / 2));    // lift pads
+const levelWardens = (n) => Math.min(5, 1 + Math.floor(n / 2));        // wardens up top
+
+/* The warden: rooted on the raised runs, and only interested in things on its
+   own level. It sits there half asleep while you are on the floor; the moment the
+   craft comes up within reach its eye opens, the chamber winds up, and it spits a
+   glob across the block level. It cannot reach the floor and the floor cannot
+   reach it, so the level above is a fight of its own - one you only have a couple
+   of hover seconds to win. */
+const WARDEN = {
+  aggro: 30,        // it only wakes for something up on its level
+  wake: 0.5,        // the eye opening
+  charge: 0.85,     // the tell before a glob
+  rate: 2.2,        // seconds between globs
+  shotSpeed: 15,
+  dmg: 9,
+  r: 0.95,
+  top: BLOCK_H + 0.62, // where it sits: on the block top
+};
 
 const ROAM_AGGRO = 32;   // how far a roamer goes looking for you
 const GUARD_AGGRO = 15;  // how far an exit defender strays from its post
@@ -863,6 +881,7 @@ const enemyEyeMat = {
 const ENEMY_SPEC = {
   grunt: { hp: 2, speed: 5.4 },
   spitter: { hp: 3, speed: 3.8 },
+  warden: { hp: 3, speed: 0 },
 };
 
 /* ------------------------------------------------------------ the spitter */
@@ -905,6 +924,63 @@ function buildSpitter() {
     group.add(fin);
   }
   return { group, body, eye, snout, mouth, mouthMat };
+}
+
+/* ------------------------------------------------------------ the warden */
+// It has no legs, because its level is small and it only has to hold it: a stone
+// bulb grown on a block top, roots into the stone, one big eye behind a ringed
+// mouth. Every level above the floor gets one more of them.
+const wardenRootGeo = new THREE.ConeGeometry(0.55, 0.5, 7);
+const wardenBodyGeo = new THREE.IcosahedronGeometry(0.62, 0);
+const wardenEyeGeo = new THREE.SphereGeometry(0.19, 10, 8);
+const wardenLipGeo = new THREE.TorusGeometry(0.34, 0.09, 6, 16);
+const wardenSpikeGeo = new THREE.ConeGeometry(0.11, 0.42, 5);
+const wardenRootMat = new THREE.MeshStandardMaterial({
+  color: 0x4f3620, roughness: 0.9, metalness: 0.1, emissive: 0x2a1206, emissiveIntensity: 0.6,
+});
+const wardenBodyMat = new THREE.MeshStandardMaterial({
+  color: 0x5c4d33, roughness: 0.75, metalness: 0.2, emissive: 0x2c220c, emissiveIntensity: 0.5,
+});
+const wardenLipMatBase = new THREE.MeshStandardMaterial({
+  color: 0xb8ff59, emissive: 0x9dff3c, emissiveIntensity: 1.2, roughness: 0.4,
+});
+const wardenEyeMatBase = new THREE.MeshStandardMaterial({
+  color: 0xeaffc0, emissive: 0xc8ff5e, emissiveIntensity: 1.6,
+});
+const wardenSpikeMat = new THREE.MeshStandardMaterial({
+  color: 0x4e3a22, roughness: 0.85, metalness: 0.2, emissive: 0x1c1004, emissiveIntensity: 0.5,
+});
+
+function buildWarden() {
+  const group = new THREE.Group();
+  const root = new THREE.Mesh(wardenRootGeo, wardenRootMat);
+  root.position.y = 0.22;
+  group.add(root);
+
+  const body = new THREE.Mesh(wardenBodyGeo, wardenBodyMat);
+  body.position.y = 0.72;
+  group.add(body);
+
+  // the mouth points down local -Z, which is where the craft is
+  const lipMat = wardenLipMatBase.clone();
+  const lip = new THREE.Mesh(wardenLipGeo, lipMat);
+  lip.position.set(0, 0.76, -0.52);
+  group.add(lip);
+  const eyeMat = wardenEyeMatBase.clone();
+  const eye = new THREE.Mesh(wardenEyeGeo, eyeMat);
+  eye.position.set(0, 0.76, -0.54);
+  group.add(eye);
+
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + 0.4;
+    const spike = new THREE.Mesh(wardenSpikeGeo, wardenSpikeMat);
+    spike.position.set(Math.cos(a) * 0.52, 0.78 + Math.sin(a * 2) * 0.1, Math.sin(a) * 0.4);
+    spike.rotation.z = Math.cos(a) * 0.9;
+    spike.rotation.x = Math.sin(a) * 0.7;
+    group.add(spike);
+  }
+  group.scale.setScalar(1.15); // a size you can read from the other end of a run
+  return { group, body, eye, lip, lipMat, eyeMat };
 }
 
 /* ------------------------------------------------------------ the mine */
@@ -1017,15 +1093,19 @@ function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0 } = {}) {
   if (type === "lurker") return spawnShade(x, z, power);
   const spec = ENEMY_SPEC[type];
   const mine = type === "grunt" ? buildMine(x, z) : null;
-  const spitter = mine ? null : buildSpitter();
-  const { group, body, eye } = mine || spitter;
-  if (!mine) group.position.set(x, 1.1, z);
+  const spitter = type === "spitter" ? buildSpitter() : null;
+  const warden = type === "warden" ? buildWarden() : null;
+  const { group, body, eye } = mine || spitter || warden;
+  if (warden) group.position.set(x, BLOCK_H, z); // up on the block top
+  else if (!mine) group.position.set(x, 1.1, z);
   enemyGroup.add(group);
 
   const hp = spec.hp + Math.floor(power / 3) + hpBonus;
   return {
-    type, group, body, eye, mine, spitter,
-    x, z, hp, maxHp: hp, r: ENEMY_R,
+    type, group, body, eye, mine, spitter, warden,
+    level: type === "warden" ? 1 : 0,
+    state: type === "warden" ? "lurk" : null,
+    x, z, hp, maxHp: hp, r: warden ? WARDEN.r : ENEMY_R,
     speed: spec.speed * (1 + power * 0.05),
     fireT: 1 + decor(),
     fireRate: Math.max(0.7, 2.4 - power * 0.13),
@@ -1090,6 +1170,8 @@ const seedRingGeo = new THREE.TorusGeometry(0.6, 0.1, 6, 14);
 const boltMat = new THREE.MeshBasicMaterial({ color: 0x9defff, toneMapped: false });
 const seedMat = new THREE.MeshBasicMaterial({ color: 0xffa8e8, toneMapped: false });
 const seedRingMat = new THREE.MeshBasicMaterial({ color: 0xb44bff, toneMapped: false });
+const globGeo = new THREE.IcosahedronGeometry(0.46, 0);
+const globMat = new THREE.MeshBasicMaterial({ color: 0xc8ff5e, toneMapped: false });
 
 // the glow rides along as a sprite child; built on first use, because the spark
 // texture lives further down the file
@@ -1105,6 +1187,10 @@ function shotGlow(kind) {
         map: sparkTex, color: 0xb44bff, transparent: true, opacity: 0.75,
         blending: THREE.AdditiveBlending, depthWrite: false,
       }),
+      glob: new THREE.SpriteMaterial({
+        map: sparkTex, color: 0x9dff3c, transparent: true, opacity: 0.8,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
     };
   }
   return shotGlowMats[kind];
@@ -1116,9 +1202,13 @@ const shotDir = new THREE.Vector3();
 let bullets = [];
 let eBullets = [];
 
-function addBullet(list, kind, x, y, z, vx, vz, life, dmg) {
+function addBullet(list, kind, x, y, z, vx, vz, life, dmg, level = 0) {
   const isSeed = kind === "seed";
-  const mesh = new THREE.Mesh(isSeed ? seedGeo : boltGeo, isSeed ? seedMat : boltMat);
+  const isGlob = kind === "glob";
+  const mesh = new THREE.Mesh(
+    isGlob ? globGeo : isSeed ? seedGeo : boltGeo,
+    isGlob ? globMat : isSeed ? seedMat : boltMat
+  );
   shotDir.set(vx, 0, vz).normalize();
   mesh.quaternion.setFromUnitVectors(SHOT_UP, shotDir);
   mesh.position.set(x, y, z);
@@ -1127,11 +1217,11 @@ function addBullet(list, kind, x, y, z, vx, vz, life, dmg) {
     ring.rotation.x = Math.PI / 2; // a ring across the flight axis
     mesh.add(ring);
   }
-  const glow = new THREE.Sprite(shotGlow(isSeed ? "seed" : "bolt"));
-  glow.scale.setScalar(isSeed ? 1.3 : 0.85);
+  const glow = new THREE.Sprite(shotGlow(isGlob ? "glob" : isSeed ? "seed" : "bolt"));
+  glow.scale.setScalar(isGlob ? 1.6 : isSeed ? 1.3 : 0.85);
   mesh.add(glow);
   bulletGroup.add(mesh);
-  list.push({ x, y, z, vx, vz, life, dmg, mesh, seed: isSeed });
+  list.push({ x, y, z, vx, vz, life, dmg, mesh, seed: isSeed, level });
 }
 
 /* ------------------------------------------------------------- explosions */
@@ -1728,7 +1818,7 @@ function spawnShade(x, z, power) {
   const hp = LURK.hp(power);
   return {
     ...look,
-    type: "lurker", group: look.group,
+    type: "lurker", group: look.group, level: 0,
     x, z, hp, maxHp: hp, r: LURK.radius,
     speed: LURK.stalkSpeed, dead: false, hitT: 0, guard: false,
     homeX: x, homeZ: z, aggro: LURK.wake, leash: 0,
@@ -1876,6 +1966,55 @@ function stepShade(e, dt) {
   }
 
   if (d < LURK.radius + RADIUS + 0.2) shadeKills(e);
+}
+
+// The warden does not move: it holds the level above the floor. It only wakes
+// for something on that level, winds up (the eye is the tell) and spits a glob.
+// On the floor you can walk right under it and it will not care.
+function stepWarden(e, dt) {
+  const dx = pos.x - e.x;
+  const dz = pos.z - e.z;
+  const d = Math.hypot(dx, dz) || 1e-6;
+  const ux = dx / d;
+  const uz = dz / d;
+  e.t += dt;
+  e.hitT = Math.max(0, e.hitT - dt);
+  e.recoilT = Math.max(0, e.recoilT - dt);
+
+  const awake = craftLevel() === 1 && d < WARDEN.aggro;
+  if (awake) {
+    if (e.state !== "awake") {
+      e.state = "awake";
+      e.fireT = WARDEN.charge;
+      gameAudio.sfx("wardenWake", { x: e.x, z: e.z });
+      gameAudio.poke(0.35);
+    }
+    e.fireT -= dt;
+    if (e.fireT <= 0) {
+      e.fireT = WARDEN.rate * (0.85 + decor() * 0.3);
+      // it flies on the craft's level, so a glob is a thing that can reach you
+      addBullet(eBullets, "glob", e.x + ux * 1.15, HOVER + LIFT.alt - 0.1, e.z + uz * 1.15,
+        ux * WARDEN.shotSpeed, uz * WARDEN.shotSpeed, 3.2, WARDEN.dmg, 1);
+      gameAudio.sfx("wardenShot", { x: e.x, z: e.z });
+      e.recoilT = 0.22;
+    }
+  } else {
+    if (e.state === "awake") e.state = "lurk";
+    e.fireT = Math.max(e.fireT, WARDEN.charge * 0.6);
+  }
+
+  const charge = awake ? clamp01(1 - e.fireT / WARDEN.charge) : 0;
+  const pulse = 0.5 + 0.5 * Math.sin(e.t * 2.2 + e.phase);
+  e.warden.eyeMat.emissiveIntensity = 0.7 + charge * 5 + pulse * 0.4;
+  e.warden.eye.scale.setScalar(0.85 + charge * 0.7 + (e.hitT > 0 ? 0.6 : 0));
+  e.warden.lipMat.emissiveIntensity = 0.6 + charge * 3.4;
+  e.warden.body.scale.setScalar(1 + charge * 0.1 + e.hitT * 1.2 - e.recoilT * 0.6);
+  e.group.position.set(e.x, BLOCK_H + Math.sin(e.t * 1.6 + e.phase) * 0.04, e.z);
+  e.group.rotation.y = Math.atan2(-dx, -dz);
+  e.group.rotation.z = Math.sin(e.t * 1.1 + e.phase) * 0.05;
+
+  // rooted, but solid: flying through one on its own level hurts
+  if (awake && d < WARDEN.r + RADIUS + 0.1) hurtPlayer(TOUCH_DMG * 0.6);
 }
 
 /* ------------------------------------------------------- monster rifts */
@@ -2163,6 +2302,10 @@ let wallTop = new Map();
 // Is the craft high enough that the floor cannot touch it?
 const airborne = () => lift >= LIFT.safe;
 
+// Which of the two levels the craft is on. Shots, globs and touches all carry a
+// level, and only things on the same level can reach each other.
+const craftLevel = () => (lift >= LIFT.fly ? 1 : 0);
+
 // How high under the craft has to be clear for it to pass: everything lower than
 // the hull is flown over, everything taller still blocks. At floor level nothing
 // is clear, so the maze is exactly what it was.
@@ -2170,6 +2313,14 @@ const belly = () => HOVER + lift * LIFT.alt - 0.85;
 function overWalls(c, r) {
   const h = wallTop.get(`${c},${r}`);
   return h !== undefined && h < belly();
+}
+
+// The same for something that is flying on the level above (a shot up there):
+// low blocks are underneath it, walls and towers are not.
+const UPPER_CLEAR = HOVER + LIFT.alt - 0.85;
+function overLowWalls(c, r) {
+  const h = wallTop.get(`${c},${r}`);
+  return h !== undefined && h < UPPER_CLEAR;
 }
 
 // Ground at the level the craft is at: a block top under it, not the floor far
@@ -2307,6 +2458,21 @@ function startLevel(n) {
     enemies.push(spawnShade(level.cellToWorldX(c), level.cellToWorldZ(r), n));
   }
 
+  /* wardens: rooted on the raised runs, so the level above is contested */
+  {
+    const spots = [];
+    for (const key of level.upper) {
+      const [c, r] = key.split(",").map(Number);
+      if (near(c, r, pos.x, pos.z) < 22) continue;
+      if (spots.some((w) => Math.hypot(w.x - level.cellToWorldX(c), w.z - level.cellToWorldZ(r)) < 18)) continue;
+      spots.push({ x: level.cellToWorldX(c), z: level.cellToWorldZ(r) });
+    }
+    for (let i = 0; i < levelWardens(n) && spots.length; i++) {
+      const spot = spots.splice(Math.floor(rng() * spots.length), 1)[0];
+      enemies.push(spawnEnemy("warden", spot.x, spot.z, n));
+    }
+  }
+
   /* rifts: standing spawn points that keep the pressure up */
   makeRifts(levelRifts(n), rng);
 
@@ -2348,7 +2514,6 @@ function killPlayer() {
 // caught next to a mine is never a free walk-away.
 function hurtPlayer(dmg, { pierce = false } = {}) {
   if (state !== "playing" || (hurtT > 0 && !pierce)) return;
-  if (airborne()) return; // nothing on the floor reaches the deck
   hp -= dmg;
   hurtT = HURT_COOLDOWN;
   hurtFlash = Math.min(1, hurtFlash + 0.5 + dmg * 0.02);
@@ -2413,7 +2578,7 @@ function detonateMine(e, { credit = false } = {}) {
   spawnDebris(e.x, 1.0, e.z, { palette: "blast", count: 20, speed: 20, lift: 14, spread: 1.2, life: 13 });
   gameAudio.sfx("boom", { x: e.x, z: e.z });
   gameAudio.poke(0.75);
-  const dmg = blastDamage(d);
+  const dmg = airborne() ? 0 : blastDamage(d); // a floor blast does not reach the level above
   if (dmg > 0) {
     hurtFlash = Math.min(1, hurtFlash + 0.3);
     hurtPlayer(dmg, { pierce: true });
@@ -2487,8 +2652,8 @@ function stepMine(e, dt) {
 
 function tryFire() {
   if (state !== "playing") return;
-  if (lift > 0.02) {
-    // the lift field has the guns: say so on the HUD instead of eating the input
+  if (lift > 0.02 && lift < LIFT.fly) {
+    // mid-ride the lift field holds the guns: say so on the HUD, do not eat the key
     el.lift.classList.add("deny");
     liftDenyT = 0.28;
     return;
@@ -2497,8 +2662,9 @@ function tryFire() {
   fireT = FIRE_COOLDOWN;
   const fx = Math.sin(yaw);
   const fz = -Math.cos(yaw);
-  addBullet(bullets, "bolt", pos.x + fx * NOSE, HOVER, pos.z + fz * NOSE,
-    fx * BULLET_SPEED, fz * BULLET_SPEED, BULLET_LIFE, 1);
+  const level = craftLevel();
+  addBullet(bullets, "bolt", pos.x + fx * NOSE, HOVER + level * LIFT.alt, pos.z + fz * NOSE,
+    fx * BULLET_SPEED, fz * BULLET_SPEED, BULLET_LIFE, 1, level);
   ufoMuzzle.visible = true;
   muzzleT = 0.06;
   gameAudio.sfx("shoot");
@@ -2706,6 +2872,10 @@ function updateEnemies(dt) {
       stepMine(e, dt);
       continue;
     }
+    if (e.type === "warden") {
+      stepWarden(e, dt);
+      continue;
+    }
     const dx = pos.x - e.x;
     const dz = pos.z - e.z;
     const d = Math.hypot(dx, dz) || 1e-6;
@@ -2762,10 +2932,12 @@ function updateBullets(dt) {
     b.life -= dt;
     let kill = b.life <= 0;
     let hitRock = false;
-    if (!kill && level.hitsWall(b.x, b.z, BULLET_R)) { kill = true; hitRock = true; }
+    const skip = b.level === 1 ? overLowWalls : null;
+    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip)) { kill = true; hitRock = true; }
     if (!kill) {
       for (const e of enemies) {
         if (e.dead) continue;
+        if ((e.level || 0) !== b.level) continue; // not on the same level
         if (Math.hypot(e.x - b.x, e.z - b.z) < (e.r || ENEMY_R) + BULLET_R) {
           e.hp -= b.dmg;
           e.hitT = 0.12;
@@ -2797,8 +2969,9 @@ function updateBullets(dt) {
     b.life -= dt;
     let kill = b.life <= 0;
     let hitRock = false;
-    if (!kill && level.hitsWall(b.x, b.z, BULLET_R)) { kill = true; hitRock = true; }
-    if (!kill && !airborne() && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
+    const skip = b.level === 1 ? overLowWalls : null;
+    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip)) { kill = true; hitRock = true; }
+    if (!kill && b.level === craftLevel() && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
       hurtPlayer(b.dmg);
       kill = true;
     }
@@ -2934,6 +3107,8 @@ globalThis.UFO = {
   stuckAt: (x, z) => level.hitsWall(x, z),
   get keys() { return [...keys]; },
   get shades() { return enemies.filter((e) => e.type === "lurker"); },
+  get wardens() { return enemies.filter((e) => e.type === "warden"); },
+  get levelNow() { return craftLevel(); },
   get rifts() { return rifts; },
   get riftsOpened() { return riftsOpened; },
   get debris() { return debris; },

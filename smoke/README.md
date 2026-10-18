@@ -35,7 +35,10 @@ scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
 blast, parks on top of one and watches it go off on the spot, walks out of one and
 does not, rides a lift pad up one level and checks what that level does (low blocks
 underneath, walls still in the way, the hover meter draining over open floor and
-filling on a block top), counts what the spitters are carrying, checks that the
+filling on a block top, shots and globs carrying the level they are fired on, a
+mine underneath that cannot latch on), meets a warden up there and checks that it
+sleeps while the craft is on the floor and that it wakes, spits and dies on its own
+level, counts what the spitters are carrying, checks that the
 score is only poked by things worth scoring, reaches the exit, advances a level,
 dies and restarts.
 
@@ -68,6 +71,7 @@ node smoke/shot.mjs smoke/out/blast.png "&pose=blast"    # ...and the moment it 
 node smoke/shot.mjs smoke/out/pad.png    "&pose=pad"       # a lift pad and its level marker
 node smoke/shot.mjs smoke/out/block.png  "&pose=block"     # up one level, over a block top
 node smoke/shot.mjs smoke/out/run.png    "&pose=run"       # a raised run seen from the floor
+node smoke/shot.mjs smoke/out/warden.png "&pose=warden"    # a warden charging a glob
 node smoke/shot.mjs smoke/out/volley.png "&boom=volley"      # your bolts in the air
 node smoke/shot.mjs smoke/out/seeds.png  "&boom=seeds"       # a spitter with a seed out
 node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"   # freeze mid-fireball
@@ -78,7 +82,8 @@ Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 (a shade awake and hunting), `rift`, `mine`, `fuse` (mid-fuse, kill ring out),
 `blast` (the instant after a mine goes off), `pad` (a lift pad from the floor),
 `block` (the craft up one level, standing over a low block), `run` (a raised run
-from the floor, so both levels are in one frame). Extras: `&boom=enemy|player`
+from the floor, so both levels are in one frame), `warden` (up on the block level
+with a warden, caught winding a glob up). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
@@ -86,8 +91,8 @@ shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
 `&boom=volley` (hold fire with a bolt clear of the craft's own glow) and
 `&boom=seeds` (wait for a spitter's chamber to light up, then hold the frame until
 the seed it spits is in the air), `&lift=1` (take a pad up one level and report the
-level: altitude, meter, whether a block is underneath, whether a wall still
-blocks),
+level: altitude, meter, whether a block is underneath, whether a wall still blocks,
+and what the wardens up there are doing),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
 The probe also reports `shots` (how many of each kind are in the air).
 
@@ -162,6 +167,8 @@ UFO.shades, UFO.hunted, UFO.rifts, UFO.riftsOpened, UFO.debris, UFO.splats, UFO.
 UFO.mine, UFO.blastAt(d), UFO.audio
 UFO.pads, UFO.blocks, UFO.highWalls, UFO.wallTopAt(x, z), UFO.blockedAt(x, z)
 UFO.lift, UFO.alt, UFO.charge, UFO.liftUp, UFO.onBlock, UFO.liftCfg
+UFO.wardens, UFO.levelNow       // the thing up top, and which level the craft is on
+UFO.bullets[0].level            // every shot carries the level it was fired on
 UFO.move(x, z), UFO.aim(x, z), UFO.damage(n), UFO.kill(), UFO.killPlayer(), UFO.stuckAt(x, z)
 
 // sound

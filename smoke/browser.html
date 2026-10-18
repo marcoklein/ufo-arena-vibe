@@ -127,6 +127,38 @@
           UFO.aim(b.x, b.z);
           await frames(24);
         }
+      } else if (pose === "warden") {
+        // up on the block level with a warden, caught winding up a glob
+        const w = UFO.wardens[0];
+        if (w) {
+          const pad = UFO.pads.reduce(
+            (best, p) => (Math.hypot(p.x - w.x, p.z - w.z) < Math.hypot(best.x - w.x, best.z - w.z) ? p : best),
+            UFO.pads[0],
+          );
+          UFO.move(pad.x, pad.z);
+          await frames(50);
+          // stand on a block with a clear line to it, far enough away that the
+          // craft is not covering it in the shot
+          const clearLine = (ax, az, bx, bz) => {
+            for (let t = 0.12; t < 1; t += 0.12) {
+              if (UFO.blockedAt(ax + (bx - ax) * t, az + (bz - az) * t)) return false;
+            }
+            return true;
+          };
+          const perch = UFO.blocks.find((b) => {
+            const d = Math.hypot(b.x - w.x, b.z - w.z);
+            return d > 6 && d < 13 && clearLine(b.x, b.z, w.x, w.z);
+          }) || UFO.blocks.find((b) => {
+            const d = Math.hypot(b.x - w.x, b.z - w.z);
+            return d > 2.5 && d < 10;
+          });
+          if (perch) UFO.move(perch.x, perch.z);
+          UFO.aim(w.x, w.z);
+          for (let i = 0; i < 220; i++) {
+            await frames(1);
+            if (w.warden && w.warden.eyeMat.emissiveIntensity > 4) break;
+          }
+        }
       } else if (pose === "mine") {
         // an armed-adjacent look at one mine from outside its arming range
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
@@ -324,6 +356,8 @@
         const tall = UFO.highWalls[0];
         if (tall) liftInfo.blockedOverWall = UFO.blockedAt(tall.x, tall.z);
         liftInfo.pads = UFO.pads.length;
+        liftInfo.wardens = UFO.wardens.length;
+        liftInfo.wardenState = UFO.wardens[0] ? UFO.wardens[0].state : null;
       }
 
       // ?mine=1 — arm a red diamond, back out of the ring, and report the blast

@@ -70,7 +70,7 @@ const START = { x: UFO.pos.x, z: UFO.pos.z };
 ok(UFO.level === 1, `boots on level 1 (got ${UFO.level})`);
 ok(UFO.state === "playing", "boots in the playing state");
 ok(UFO.hp === 100, `full health at start (${UFO.hp})`);
-ok(UFO.monsters === 11, `level 1 spawns 11 monsters (got ${UFO.monsters})`);
+ok(UFO.monsters === 12, `level 1 spawns 12 monsters (11 on the floor + 1 warden, got ${UFO.monsters})`);
 ok(!UFO.stuck, "player starts outside the walls");
 
 /* movement */
@@ -151,7 +151,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   const k0 = UFO.kills;
   let landed = false;
   for (let attempt = 0; attempt < 12 && !landed; attempt++) {
-    const target = UFO.enemies.find((e) => !e.dead);
+    const target = UFO.enemies.find((e) => !e.dead && e.level === 0);
     if (!target) break;
     for (let a = 0; a < 16 && !landed; a++) {
       const ang = (a / 16) * Math.PI * 2;
@@ -165,7 +165,7 @@ ok(!UFO.stuck, "player starts outside the walls");
     }
   }
   ok(landed, `shots kill monsters (${UFO.kills - k0} killed)`);
-  ok(UFO.monsters < 11, `monster count drops (${UFO.monsters} left)`);
+  ok(UFO.monsters < 12, `monster count drops (${UFO.monsters} left)`);
   ok(UFO.particles > 0, `a kill throws debris (${UFO.particles} particles)`);
   ok(UFO.debris.length > 0, `and wreckage too (${UFO.debris.length} pieces)`);
 }
@@ -197,7 +197,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.state === "playing", "R restarts the run");
   ok(!document.getElementById("overlay").classList.contains("show"), "restart clears the card");
   ok(UFO.level === 1 && UFO.hp === 100 && UFO.kills === 0, "restart resets level, health and score");
-  ok(UFO.monsters === 11, `restart respawns level 1 (${UFO.monsters} monsters)`);
+  ok(UFO.monsters === 12, `restart respawns level 1 (${UFO.monsters} monsters)`);
 }
 
 /* a shade waits in the rooms, wakes up, and takes the craft with it */
@@ -464,7 +464,6 @@ ok(!UFO.stuck, "player starts outside the walls");
   down("KeyR");
   up("KeyR");
   frame(2);
-  UFO.kill(); // clear the room: this block is about the lift, not a fight
   const audio = UFO.audio;
   const pads = UFO.pads;
   const cfg = UFO.liftCfg;
@@ -488,6 +487,14 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.liftUp && UFO.lift > 0, `driving onto it lifts the craft (lift ${UFO.lift.toFixed(2)})`);
   ok(pad.used, "and the pad is spent until you drive off it");
   ok(audio.log.includes("liftUp"), "the pad announces the ride");
+
+  // mid-ride the lift field holds the guns
+  const mid = UFO.bullets.length;
+  down("Space");
+  frame(2);
+  up("Space");
+  ok(UFO.bullets.length === mid, "mid-ride no shot leaves: the lift field holds the guns");
+  ok(els.lift.classList.contains("deny"), "and the HUD flashes to say why");
 
   frame(60);
   ok(UFO.lift === 1, "exactly one level up, no more");
@@ -516,18 +523,21 @@ ok(!UFO.stuck, "player starts outside the walls");
   const tall = UFO.highWalls.find((w) => Math.hypot(w.x - block.x, w.z - block.z) < 14) || UFO.highWalls[0];
   ok(UFO.blockedAt(tall.x, tall.z), "but a real wall still is");
 
-  // the guns are offline up there, and the HUD says why
-  const shots = UFO.bullets.length;
+  // up on the level the guns work again - and the bolt is up there with you
   down("Space");
   frame(3);
   up("Space");
-  ok(UFO.bullets.length === shots, "the lift field has the guns: no shot leaves");
-  ok(els.lift.classList.contains("deny"), "and the HUD flashes to say why");
+  const upperShot = UFO.bullets.find((b) => b.level === 1);
+  ok(!!upperShot, "up on the level the guns work, and the bolt flies on that level");
+  ok(!!upperShot && Math.abs(upperShot.y - (2.6 + 1.6)) < 0.01, `from the height the craft is at (${upperShot && upperShot.y})`);
 
-  // nothing on the floor can reach it
-  const hpUp = UFO.hp;
-  UFO.damage(35);
-  ok(UFO.hp === hpUp, `the floor cannot hurt it while it is up there (${UFO.hp})`);
+  // a mine on the floor under the craft cannot latch on from down there
+  const under = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+  if (under) {
+    UFO.move(under.x, under.z);
+    frame(10);
+    ok(!under.armed && !under.dead, "a mine under the level above cannot latch on");
+  }
 
   // flying over the exit is not reaching it
   const exitW = UFO.worldOf(UFO.exit.col, UFO.exit.row);
@@ -564,6 +574,72 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(2);
   ok(!pad.used, "driving off it re-arms it");
 
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+}
+
+/* the warden: it holds the level above the floor */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  const wardens = UFO.wardens;
+  ok(wardens.length === 1, `level 1 posts ${wardens.length} warden on the raised runs`);
+  const w = wardens[0];
+  if (w) {
+    ok(w.level === 1, "it lives on the level above the floor");
+    ok(Math.abs(w.group.position.y - UFO.liftCfg.alt) < 0.2,
+      `rooted on a block top (y ${w.group.position.y.toFixed(2)})`);
+
+    // on the floor it is asleep, and nothing of its reaches down
+    UFO.move(w.x + 9, w.z);
+    frame(90);
+    ok(w.state === "lurk", "on the floor it stays asleep");
+    ok(!UFO.eBullets.some((b) => b.level === 1), "and never spits down at the floor");
+    const hpFloor = UFO.hp;
+    frame(30);
+    ok(UFO.hp === hpFloor, `standing under it is safe (${UFO.hp})`);
+
+    // lift, and stand on a raised block beside it
+    const perch = UFO.blocks.find((b) => {
+      const d = Math.hypot(b.x - w.x, b.z - w.z);
+      return d > 2.5 && d < 10;
+    });
+    const pad = UFO.pads.reduce(
+      (best, p) => (Math.hypot(p.x - w.x, p.z - w.z) < Math.hypot(best.x - w.x, best.z - w.z) ? p : best),
+      UFO.pads[0],
+    );
+    UFO.move(pad.x, pad.z);
+    frame(40);
+    ok(UFO.lift === 1, "the craft is up on its level");
+    if (perch) UFO.move(perch.x, perch.z);
+    frame(2);
+    ok(UFO.onBlock, "standing on a raised block beside it");
+
+    let glob = null;
+    const hpBefore = UFO.hp;
+    for (let i = 0; i < 220 && !glob; i++) {
+      frame(1);
+      glob = UFO.eBullets.find((b) => b.level === 1);
+    }
+    ok(w.state === "awake", "up on its level it wakes");
+    ok(!!glob, "and spits a glob across that level");
+    if (glob) {
+      ok(Math.abs(glob.y - (UFO.liftCfg.alt + 1.6)) < 0.25,
+        `the glob flies at the craft's level (${glob.y})`);
+      for (let i = 0; i < 120 && UFO.hp === hpBefore; i++) frame(1);
+      ok(UFO.hp < hpBefore, `and it hurts up there (${hpBefore} -> ${UFO.hp})`);
+    }
+
+    // and it can be shot from its own level
+    const hpW = w.hp;
+    UFO.aim(w.x, w.z);
+    down("Space");
+    for (let i = 0; i < 70 && !w.dead && w.hp === hpW; i++) frame(1);
+    up("Space");
+    ok(w.dead || w.hp < hpW, `a bolt up there reaches it (${hpW} -> ${w.dead ? "dead" : w.hp})`);
+  }
   down("KeyR");
   up("KeyR");
   frame(2);
@@ -644,7 +720,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.audio.log.includes("exit"), "and the exit asks for its jingle");
   frame(140);
   ok(UFO.level === 2, `advanced to level 2 (got ${UFO.level})`);
-  ok(UFO.monsters === 14, `level 2 spawns 14 monsters (got ${UFO.monsters})`);
+  ok(UFO.monsters === 16, `level 2 spawns 16 monsters (14 on the floor + 2 wardens, got ${UFO.monsters})`);
   ok(UFO.hp === 100, "health is restored on a new level");
   ok(UFO.audio.level === 2, `and the score moves to level 2 (${UFO.audio.level})`);
   ok(UFO.audio.arrangement.level === 2 && UFO.audio.arrangement.bpm > 0, "with its own arrangement");

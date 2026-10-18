@@ -302,6 +302,17 @@ const SFX = {
     noiseHit(rig, t, { dur: 0.4, peak: 0.3, lp: 1600, sweep: 140, ...o });
     tone(rig, t, { type: "triangle", f0: 220, f1: 140, dur: 0.2, peak: 0.1, spread: 40, ...o });
   },
+  // a warden opening its eye: stone grinding, and a whine coming up
+  wardenWake(rig, t, o) {
+    noiseHit(rig, t, { dur: 0.7, peak: 0.3, bp: 700, sweep: 1600, q: 1.4, ...o });
+    tone(rig, t, { type: "triangle", f0: 180, f1: 430, dur: 0.7, peak: 0.24, a: 0.05, ...o });
+    tone(rig, t + 0.12, { type: "sine", f0: 640, f1: 980, dur: 0.5, peak: 0.14, a: 0.08, ...o });
+  },
+  // and spitting a glob: wet, heavy, short
+  wardenShot(rig, t, o) {
+    tone(rig, t, { type: "triangle", f0: 330, f1: 105, dur: 0.22, peak: 0.34, a: 0.004, ...o });
+    noiseHit(rig, t, { dur: 0.18, peak: 0.24, lp: 1100, sweep: 320, ...o });
+  },
   // it meets a wall: the one that shakes the camera
   shadeCrash(rig, t, o) {
     tone(rig, t, { type: "sine", f0: 98, f1: 27, dur: 0.55, peak: 0.75, a: 0.002, ...o });
