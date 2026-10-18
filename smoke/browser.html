@@ -77,7 +77,8 @@
       {
         const needs = {
           pad: 4, block: 4, run: 4, deck: 4, hover: 4, vault: 5, pit: 4, pitair: 4,
-          tunnel: 4, spawners: 5, holeTop: 4, warden: 6, lurk: 3, shade: 3, rift: 5,
+          warden: 6,
+          tunnel: 4, spawners: 5, holeTop: 4, edge: 1, warden: 6, lurk: 3, shade: 3, rift: 5,
         };
         let want = Number(q.get("level") || 0);
         if (!want) {
@@ -101,7 +102,7 @@
         for (const [dx, dz] of [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]) {
           const x = tx + dx * dist;
           const z = tz + dz * dist;
-          if (UFO.stuckAt(x, z)) continue;
+          if (UFO.stuckAt(x, z) || UFO.holeAt(x, z)) continue;
           if (UFO.stuckAt(tx + dx * dist * 0.55, tz + dz * dist * 0.55)) continue; // wall in the way
           if (UFO.stuckAt(x + dx * 9.5, z + dz * 9.5)) continue;                   // chase camera needs room behind us
           if (UFO.wallTopAt(x, z) > 3 || UFO.wallTopAt(x + dx * 9.5, z + dz * 9.5) > 3) continue; // no tunnel roof either
@@ -187,6 +188,15 @@
         await frames(40);
         for (let i = 0; i < 260 && UFO.charge > 0.8; i++) await frames(1);
         await frames(2);
+      } else if (pose === "edge") {
+        // standing inside the map, looking out over the rim of nothing
+        const rim = UFO.rim.slice().sort((a, b) =>
+          Math.hypot(a.x - UFO.pos.x, a.z - UFO.pos.z) - Math.hypot(b.x - UFO.pos.x, b.z - UFO.pos.z))[0];
+        if (rim) {
+          const v = vantage(rim.x, rim.z, 8) || vantage(rim.x, rim.z, 12);
+          if (v) { UFO.move(v.x, v.z); UFO.aim(rim.x, rim.z); }
+        }
+        await frames(22);
       } else if (pose === "holeTop") {
         // straight down over a hole: the flat black square and its lip
         const h = UFO.pits[0];
@@ -594,11 +604,20 @@
             vaultPads: UFO.pads.filter((p) => p.vault).length,
             padFromStart: +Math.min(...UFO.pads.filter((p) => !p.vault)
               .map((p) => Math.hypot(p.x - start.x, p.z - start.z))).toFixed(1),
+            rim: UFO.rim.length,
+            towers: UFO.towers.length,
+            monoliths: UFO.monoliths.length,
+            towerness: +UFO.towerness.toFixed(2),
+            deckers: UFO.enemies.filter((e) => e.deck).length,
             onBlock: UFO.onBlock,
             charge: +UFO.charge.toFixed(2),
             overHole: UFO.overHole,
           },
           rooms: UFO.rooms.length,
+          startRoom: `${UFO.rooms[0].w}x${UFO.rooms[0].h}`,
+          // how far the chase camera actually got from the craft: a start room too
+          // small shows up here as a camera jammed against the back of the saucer
+          camDist: +Math.hypot(UFO.camPos.x - UFO.pos.x, UFO.camPos.z - UFO.pos.z).toFixed(1),
           dust,
           holes: holeInfo,
           falling: UFO.falling,

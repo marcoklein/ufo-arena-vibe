@@ -33,7 +33,7 @@
 
       const q = new URLSearchParams(location.search);
       const lvl = Number(q.get("level") || 1);
-      const size = lvl <= 2 ? 11 + lvl * 2 : lvl === 3 ? 21 : Math.min(35, 23 + (lvl - 4) * 2);
+      const size = lvl <= 2 ? 13 + lvl * 2 : lvl === 3 ? 21 : Math.min(35, 23 + (lvl - 4) * 2);
       const upper = lvl >= 4;              // UNLOCK.upper
       const liftCount = upper ? Math.min(6, 2 + Math.floor((lvl - 4) / 2)) : 0;
       const L = createLevel({

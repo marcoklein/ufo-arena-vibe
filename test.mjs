@@ -22,12 +22,29 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
 
   ok(L.cols === cols && L.rows === rows, `L${lvl}: grid is ${cols}x${rows}`);
 
-  let borderOk = true;
-  for (let c = 0; c < cols; c++) if (!L.walls.has(`${c},0`) || !L.walls.has(`${c},${rows - 1}`)) borderOk = false;
-  for (let r = 0; r < rows; r++) if (!L.walls.has(`0,${r}`) || !L.walls.has(`${cols - 1},${r}`)) borderOk = false;
-  ok(borderOk, `L${lvl}: walls fully enclose the level`);
+  // the rim is a band of nothing: no wall round the map any more, but a hole on
+  // every border cell, and nothing at all beyond it
+  let rim = true;
+  for (let c = 0; c < cols; c++) {
+    if (!L.pits.has(`${c},0`) || !L.pits.has(`${c},${rows - 1}`)) rim = false;
+    if (L.walls.has(`${c},0`) || L.walls.has(`${c},${rows - 1}`)) rim = false;
+  }
+  for (let r = 0; r < rows; r++) {
+    if (!L.pits.has(`0,${r}`) || !L.pits.has(`${cols - 1},${r}`)) rim = false;
+    if (L.walls.has(`0,${r}`) || L.walls.has(`${cols - 1},${r}`)) rim = false;
+  }
+  ok(rim, `L${lvl}: the edge is a void band, not a wall`);
+  {
+    const out = L.cellToWorldX(-3);
+    const edge = L.cellToWorldX(0);
+    ok(L.holeAt(out, 0) && L.holeAt(edge, 0), `L${lvl}: and off the map there is no ground at all`);
+    ok(!L.hitsWall(edge, 0) && L.hitsGround(edge, 0),
+      `L${lvl}: the craft can fly out over the rim, a walker cannot`);
+  }
 
   ok(!L.walls.has(`${L.start.col},${L.start.row}`), `L${lvl}: start cell is open`);
+  ok(L.rooms[0].w >= 8 && L.rooms[0].h >= 8,
+    `L${lvl}: the start room is big enough for the camera (${L.rooms[0].w}x${L.rooms[0].h})`);
   ok(!L.walls.has(`${L.exit.col},${L.exit.row}`), `L${lvl}: exit cell is open`);
   ok(L.openCells.length > cols * rows * 0.3, `L${lvl}: level is open enough (${L.openCells.length} free cells)`);
 
@@ -50,6 +67,8 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
       for (const [dx, dz] of [[STEP, 0], [-STEP, 0], [0, STEP], [0, -STEP]]) {
         const nx = x + dx;
         const nz = z + dz;
+        // stay inside the map: past the void rim there is no floor to walk on
+        if (Math.abs(nx) > (cols - 1) * CELL / 2 || Math.abs(nz) > (rows - 1) * CELL / 2) continue;
         const k = key(nx, nz);
         if (seen.has(k)) continue;
         seen.add(k);
@@ -84,10 +103,13 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
         while (stack.length) {
           const [a, b] = stack.pop();
           for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-            const kk = `${a + dc},${b + dr}`;
+            const cc = a + dc;
+            const rr = b + dr;
+            if (cc < 1 || rr < 1 || cc >= cols - 1 || rr >= rows - 1) continue;
+            const kk = `${cc},${rr}`;
             if (L.walls.has(kk) || seen.has(kk)) continue;
             seen.add(kk);
-            stack.push([a + dc, b + dr]);
+            stack.push([cc, rr]);
           }
         }
       }
@@ -145,7 +167,7 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
   {
     const row = L.start.row;
     let to = L.start.col;
-    while (!L.walls.has(`${to},${row}`)) to++;
+    while (to < cols - 1 && !L.walls.has(`${to},${row}`)) to++;
     const from = to - 1;
     const faceX = L.cellToWorldX(to) - CELL / 2;
     let cx = L.cellToWorldX(from);
@@ -193,7 +215,11 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
   // half; a void run is a corridor by definition and is checked for connectivity
   // instead (the walk from the start is recounted, and a run that severs anything
   // is taken back)
-  const roomPits = [...L.pits].filter((k) => !L.voids.has(k));
+  const roomPits = [...L.pits].filter((k) => {
+    if (L.voids.has(k)) return false;
+    const [c, r] = k.split(",").map(Number);
+    return !L.isBorderCell(c, r);   // the rim is a hole too, and it is not in a room
+  });
   const pitsClear = roomPits.every((k) => {
     const [c, r] = k.split(",").map(Number);
     return L.rooms.some((room) =>
@@ -268,11 +294,16 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
   ok(padNear, `L${lvl}: a lift pad stands beside the level above`);
 }
 
-/* a level built before the lift is introduced has none of it */
+/* a level built before the lift is introduced has none of it - only the rim */
 for (const lvl of [1, 2, 3]) {
   const L = createLevel({ cols: 25, rows: 25, seed: 1000 + lvl, liftCount: 0, upper: false });
-  ok(L.upper.size === 0 && L.pits.size === 0 && L.lifts.length === 0,
-    `L${lvl}: with the lift switched off there is no level above and no holes`);
+  const inner = [...L.pits].filter((k) => {
+    const [c, r] = k.split(",").map(Number);
+    return !L.isBorderCell(c, r);
+  });
+  ok(L.upper.size === 0 && inner.length === 0 && L.lifts.length === 0,
+    `L${lvl}: with the lift switched off there is no level above and no holes in the floor`);
+  ok(L.pits.size > 0, `L${lvl}: but the rim of nothing is always there (${L.pits.size} cells)`);
 }
 
 /* lift pads: the way up onto the deck above the maze */
@@ -305,10 +336,13 @@ for (const [lvl, cols, rows, count] of [[1, 25, 25, 2], [3, 29, 29, 3], [8, 39, 
     for (let i = 0; i < q.length; i++) {
       const [c, r] = q[i];
       for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const k = `${c + dc},${r + dr}`;
+        const cc = c + dc;
+        const rr = r + dr;
+        if (cc < 1 || rr < 1 || cc >= cols - 1 || rr >= rows - 1) continue;
+        const k = `${cc},${rr}`;
         if (L.walls.has(k) || seen.has(k)) continue;
         seen.add(k);
-        q.push([c + dc, r + dr]);
+        q.push([cc, rr]);
       }
     }
     ok(plain.every(({ col, row }) => seen.has(`${col},${row}`)), `L${lvl}: every pad can be driven to`);

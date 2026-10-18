@@ -57,7 +57,7 @@ function carveV(grid, y1, y2, x, w) {
 // plus a handful of extra links so there is usually more than one way round.
 // Corridors are deliberately a mix of 1 and 2 cells wide, and dead-end stubs
 // are hung off them so the route to the exit is rarely obvious.
-function generate(cols, rows, rng, maxRooms = 99) {
+function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
   const grid = [];
   for (let r = 0; r < rows; r++) grid.push(new Array(cols).fill("#"));
 
@@ -66,9 +66,27 @@ function generate(cols, rows, rng, maxRooms = 99) {
   const carveBudget = cols * rows * 0.45;
   let carved = 0;
 
+  // The room you start in is always at least 8x8 cells: the chase camera sits 9.5
+  // units behind the craft, and a small room would keep pulling it in until it is
+  // staring at the back of the saucer. 8 cells is 32 units, so the camera has all
+  // the room it needs behind the start cell.
+  if (cols >= 12 && rows >= 12) {
+    // 8 cells across, or 9 where the map has the room to spare (a 15-wide tutorial
+    // map needs to keep four columns free for the room the exit goes in)
+    const w = Math.min(9, Math.max(8, cols - 7));
+    const h = Math.min(9, Math.max(8, rows - 7));
+    // tucked into a corner, so the rest of the map is one open block of rock to
+    // carve the other rooms out of
+    const x = 1 + Math.floor(rng() * 2);
+    const y = 1 + Math.floor(rng() * 2);
+    carveRect(grid, x, y, w, h);
+    rooms.push({ x, y, w, h, cx: x + (w >> 1), cy: y + (h >> 1), pillars: false });
+    carved += w * h;
+  }
+
   // on the tiny tutorial levels two rooms have to fit side by side, so the rooms
   // are kept small there instead of one room eating the map
-  const maxRoom = maxRooms <= 3 ? Math.max(4, Math.floor(cols / 2) - 1) : 9;
+  const maxRoom = maxRooms <= 3 ? Math.max(4, Math.floor(cols / 3)) : 9;
   for (let i = 0; i < tries && carved < carveBudget; i++) {
     if (rooms.length >= maxRooms) break;
     const w = 4 + Math.floor(rng() * (maxRoom - 3)); // 4..maxRoom cells
@@ -96,8 +114,9 @@ function generate(cols, rows, rng, maxRooms = 99) {
   /* columns inside the bigger halls. Carved before the corridors so a corridor
      always wins and a pillar can never seal a doorway. */
   const stats = { rooms: rooms.length, roomCells: carved, links: 0, tight: 0, wide: 0, stubs: 0, pillarRooms: 0 };
+  // a crowded level gets columns in nearly every hall, an open one almost none
   for (const room of rooms) {
-    if (room.w < 7 || room.h < 7 || rng() < 0.35) continue;
+    if (room.w < 7 || room.h < 7 || rng() < 0.35 - tower * 0.3) continue;
     room.pillars = true;
     stats.pillarRooms++;
     for (let r = room.y + 2; r <= room.y + room.h - 3; r += 3) {
@@ -498,7 +517,7 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
   const roofs = new Set();
   {
     const corridor = (c, r) => grid[r] && grid[r][c] === "." && !roomCells.has(`${c},${r}`);
-    const wantRoofs = Math.max(2, Math.min(6, Math.floor(cols / 6)));
+    const wantRoofs = Math.max(2, Math.min(8, Math.floor(cols / 5)));
     let runs = 0;
     for (let attempt = 0; attempt < 140 && runs < wantRoofs; attempt++) {
       const c = 2 + Math.floor(rng() * (cols - 4));
@@ -529,10 +548,10 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
 /* ------------------------------------------------------------------ level */
 export function createLevel({
   cols = 25, rows = 25, seed = 1, liftCount = 2, upper: wantUpper = true, rooms: maxRooms = 99,
-  startPad = false, startDeck = false,
+  startPad = false, startDeck = false, tower = 0.35,
 } = {}) {
   const rng = makeRng(seed);
-  const { grid, rooms, stats } = generate(cols, rows, rng, maxRooms);
+  const { grid, rooms, stats } = generate(cols, rows, rng, maxRooms, tower);
   // the level above the floor, and the holes in it. Levels before the lift is
   // introduced are built without any of it.
   const built = wantUpper
@@ -540,6 +559,21 @@ export function createLevel({
     : { upper: new Set(), holes: new Set(), vaults: [], voids: new Set(), roofs: new Set() };
   const upper = built.upper;
   const pits = built.holes;
+  // The edge of the world is a band of nothing, not a nine-metre wall. The craft
+  // can fly out over it - and then there is no ground under the hull at all, so
+  // the same hover that crosses a hole is all that keeps it there, and off the map
+  // there is nothing at all (see holeAt). That is the whole rim: not something to
+  // fly around, something to fall off.
+  const rim = new Set();
+  for (let c = 0; c < cols; c++) {
+    rim.add(`${c},0`);
+    rim.add(`${c},${rows - 1}`);
+  }
+  for (let r = 0; r < rows; r++) {
+    rim.add(`0,${r}`);
+    rim.add(`${cols - 1},${r}`);
+  }
+  for (const key of rim) pits.add(key);
   const vaults = built.vaults;
   const voids = built.voids;
   const roofs = built.roofs;
@@ -587,8 +621,13 @@ export function createLevel({
         if (cc < 0 || rr < 0 || cc >= cols || rr >= rows) { n++; continue; }
         if (grid[rr][cc] === "#") n++;
       }
-      // thick rock becomes tall towers, lone pillars become low blocks
-      wallKind.set(key, n >= 4 ? "X" : n <= 1 ? "O" : "#");
+      // thick rock becomes tall towers, lone pillars become low blocks - and the
+      // level's character decides how much of it stands up into a monolith, which
+      // is a wall you cannot see over at all
+      let kind = n >= 4 ? "X" : n <= 1 ? "O" : "#";
+      if (tower > 0.55 && rng() < (tower - 0.55) * 0.9) kind = "S";
+      else if (kind !== "X" && rng() < tower * 0.6) kind = "X";
+      wallKind.set(key, kind);
     }
   }
 
@@ -612,15 +651,41 @@ export function createLevel({
       queue.push([cc, rr]);
     }
   }
-  // Furthest room by walking distance, nudged towards the far corner of the map
-  // so the goal is genuinely tucked away rather than one turn from the start.
+  // Furthest room, both by walking distance and by plain distance: a goal that is
+  // physically round the next corner but only reachable by a long loop is no good
+  // as "the far side of the level". The room's centre may have been built over (a
+  // deck or a hole in it), so each room offers the reachable cell nearest its
+  // centre instead of only the centre itself.
   let exit = start;
   let bestScore = -1;
   for (const room of rooms) {
-    const d = dist[idx(room.cx, room.cy)];
-    if (d < 0) continue;
-    const score = d + 0.35 * Math.hypot(room.cx - start.col, room.cy - start.row);
-    if (score > bestScore) { bestScore = score; exit = { col: room.cx, row: room.cy }; }
+    let pick = null;
+    let bestD = Infinity;
+    for (let r = room.y; r < room.y + room.h; r++) {
+      for (let c = room.x; c < room.x + room.w; c++) {
+        const d = dist[idx(c, r)];
+        if (d < 0 || walls.has(`${c},${r}`)) continue;
+        const dc = Math.abs(c - room.cx) + Math.abs(r - room.cy);
+        if (dc < bestD) { bestD = dc; pick = { col: c, row: r, d }; }
+      }
+    }
+    if (!pick) continue;
+    const score = pick.d + 0.9 * Math.hypot(pick.col - start.col, pick.row - start.row);
+    if (score > bestScore) { bestScore = score; exit = { col: pick.col, row: pick.row }; }
+  }
+  // a one-room level still needs somewhere else to go, or the run would be over
+  // the moment it started: take the far corner of the room you begin in
+  if (exit.col === start.col && exit.row === start.row) {
+    const room = rooms[0];
+    let best = -1;
+    for (let r = room.y + 1; r <= room.y + room.h - 2; r++) {
+      for (let c = room.x + 1; c <= room.x + room.w - 2; c++) {
+        const key = `${c},${r}`;
+        if (walls.has(key) || pits.has(key)) continue;
+        const d = Math.hypot(c - start.col, r - start.row);
+        if (d > best + 1e-6) { best = d; exit = { col: c, row: r }; }
+      }
+    }
   }
 
   // a raised run or a hole must never swallow the exit cell itself
@@ -882,14 +947,21 @@ export function createLevel({
 
   return {
     cols, rows, walls, ground, wallKind, wallTheme, features, rooms, stats, openCells, start, exit, lifts, upper,
-    pits, voids, vaults, roofs, upperSolids,
+    pits, rim, voids, vaults, roofs, upperSolids,
     cellToWorldX, cellToWorldZ, hitsWall, resolve, slide,
     isBorderCell,
     // what a walker uses: a hole stops it just like a wall does
     walk: (x, z, dx, dz, rad = COLL) => slide(x, z, dx, dz, rad, null, ground),
     hitsGround: (x, z, rad = COLL) => hitsWall(x, z, rad, null, ground),
-    // is there a hole in the floor under this point?
-    holeAt: (x, z) => pits.has(`${colOf(x)},${rowOf(z)}`),
+    // is there a hole in the floor under this point? Off the map there is nothing
+    // at all, so that counts as a hole too: fly out over the rim and the meter is
+    // the only thing between the craft and the drop.
+    holeAt: (x, z) => {
+      const c = colOf(x);
+      const r = rowOf(z);
+      if (c < 0 || r < 0 || c >= cols || r >= rows) return true;
+      return pits.has(`${c},${r}`);
+    },
     worldOf: (c, r) => ({ x: cellToWorldX(c), z: cellToWorldZ(r) }),
     cellOf: (x, z) => ({ col: colOf(x), row: rowOf(z) }),
   };

@@ -12,8 +12,12 @@ python3 -m http.server 8000 --bind 127.0.0.1
 ## 1. Level generation and collision — `../test.mjs`
 
 Pure Node, no browser, no stubs. Generates levels at several sizes and checks
-the walls enclose the space, start/exit are open and connected, and a 60k-move
-random walk never leaves the craft buried in a wall.
+the start/exit are open and connected, and a 60k-move random walk never leaves the
+craft buried in a wall. The edge of the map is a band of nothing rather than a
+wall: the border cells are holes, the craft can fly out over them (and off the map
+there is no ground at all), anything that walks is still stopped, and the room you
+start in is always at least 8x8 cells so the chase camera has somewhere to sit
+behind the craft.
 
 ```
 node test.mjs
@@ -34,11 +38,19 @@ It also checks the two levels and the holes in them:
   corridor segment with no floor at all, taken only if the walk from the start
   survives it - so a void is a shortcut or a risk, never the only road;
 * a roof is a tunnel: solid in the level above, open on the floor, and never over
-  a hole or a pad;
+  a hole or a pad. There are more of them the bigger the map, because they are what
+  stops the level above from being a free flight path over everything;
 * the pads themselves are one and up per level, each on open floor with room
   around it, in its own cell, not on the start or the exit, reachable on foot, and
   one of them a short run from the exit. The level that introduces the lift also
   gets a pad (and a small deck) in the room you start in.
+
+Every level also has a *character*: a `tower` value from 0 to 1 that decides how
+much of the rock stands up into towers (7.5 units) and monoliths (12.5 - taller
+than the camera, so you cannot see over them) and how many of the halls get
+columns. It swings from one extreme to the other deterministically per level, so
+some levels are wide open and some are a canyon of walls to thread. The first two
+stay open.
 
 The first two levels are built with two rooms and nothing else, so the first
 lesson has nowhere to hide.
@@ -48,22 +60,27 @@ lesson has nowhere to hide.
 Boots the **real** `main.js` against a stubbed three.js (`three-mock.js`, wired
 up by `loader.mjs`) and a fake DOM, then drives the actual game loop with
 scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
-blast, parks on top of one and watches it go off on the spot, walks out of one and
-does not, rides a lift pad up one level and checks what that level does (low blocks
+blast (at that range it is instant death now, and backing out of the kill ring is
+the only way to survive one), parks on top of one and watches it go off on the spot,
+walks out of one and does not, rides a lift pad up one level and checks what that
+level does (low blocks
 underneath, walls still in the way, the hover meter draining over open floor and
 filling on a block top, shots and globs carrying the level they are fired on, a
 mine underneath that cannot latch on, the thruster lit only while it is paying to
-stay up), meets a warden up there and checks that it sleeps while the craft is on
-the floor, that it wakes, spits and dies on its own level, and that a glob drinks
-the hover and throws the craft back, wakes a shade and then walks out of its reach
+stay up), meets the garrison up there and checks that it sleeps while the craft is
+on the floor, that the wardens wake and the spitters standing on the blocks only
+ever shoot at their own level, that a shell drinks the hover, goes off like a mine
+and throws the craft back hard, wakes a shade and then walks out of its reach
 to watch it give up, counts what the spitters are carrying, walks the whole
 ladder (level 1 is six red diamonds in two rooms, 2 adds spitters, 3 the shade, 4
-the lift and a pad where you start, 5 a room full of spawners, 6 the warden),
+the lift and a pad where you start, 5 a single spawner standing between the craft
+and the exit, 6 the warden),
 drives onto a hole and checks the same meter holds it up on the floor as one level
-up and that running dry drops it out of the world, checks that a tunnel is open
-underneath and solid above, that no mote drifts through the hull, checks that the
-score is only poked by things worth scoring, reaches the exit, advances a level,
-dies and restarts, and presses F for fullscreen.
+up and that running dry drops it out of the world, flies out over the rim of the
+map and checks there is no way back, checks that a tunnel is open underneath and
+solid above, that no mote drifts through the hull, checks that the score is only
+poked by things worth scoring, reaches the exit, advances a level, dies and
+restarts **on the level it died on**, and presses F for fullscreen.
 
 ```
 node --import ./smoke/loader.mjs smoke/run.mjs
@@ -111,8 +128,9 @@ with a warden, caught winding a glob up), `hover` (up on the block level with th
 meter running, so the thruster is lit), `pit` (a hole in the floor, a few paces
 ahead), `pitair` (standing on a deck at the lip of a hole), `holeTop` (straight
 down over a hole: the flat black square and its lip), `tunnel` (down under a roof,
-where the level above is closed), `spawners` (the introduction level, after a
-couple of them have opened). Extras: `&boom=enemy|player`
+where the level above is closed), `spawners` (the introduction level, with its one
+spawner opening in front of the craft), `edge` (inside the map, looking out over the rim of
+nothing). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
@@ -127,10 +145,13 @@ that the thruster is holding the craft up and what the HUD says),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
 `&level=N` picks the level a pose or probe runs on; without it the pose picks the
 level that introduces what it shows (a spitter on 2, a shade on 3, a lift pad on
-4, spawners on 5, a warden on 6). The probe reports `shots` (how many of each kind
+4, spawners on 5, a warden on 6). The first two levels, and the spawner level,
+start with the craft pointing at the exit. The probe reports `shots` (how many of each kind
 are in the air), the ladder (what is unlocked and how many of each), the upper
-level (holes, voids, roofs, vaults, decks, pads and how far the nearest pad is from
-the start), the dust pocket, the arrival tip and the hint line.
+level (holes, voids, roofs, vaults, decks, pads, the rim, the towers and monoliths
+and how far the nearest pad is from the start), the start room's size, how far the chase camera actually got
+from the craft (`camDist`: a room too small shows up as a camera jammed against the
+saucer), the dust pocket, the arrival tip and the hint line.
 
 ## 5. Sound — `smoke/audio.mjs` (+ `smoke/audio.html`)
 
@@ -207,7 +228,9 @@ UFO.pads, UFO.blocks, UFO.highWalls, UFO.wallTopAt(x, z), UFO.blockedAt(x, z)
 UFO.lift, UFO.alt, UFO.charge, UFO.liftUp, UFO.onBlock, UFO.liftCfg
 UFO.wardens, UFO.levelNow       // the thing up top, and which level the craft is on
 UFO.hoverFx                     // the thruster: visible exactly while it is paying to stay up
-UFO.pits, UFO.voids, UFO.roofs, UFO.vaults, UFO.holeAt(x, z), UFO.overHole
+UFO.pits, UFO.rim, UFO.voids, UFO.roofs, UFO.vaults, UFO.holeAt(x, z), UFO.overHole
+UFO.towerness, UFO.towers, UFO.monoliths   // this level's character
+UFO.camPos                      // where the chase camera ended up (is it jammed?)
 UFO.falling                     // > 0 while it is dropping out of the world
 UFO.dust, UFO.dustBubble        // the motes, and the pocket kept clear round the craft
 UFO.ladder, UFO.tip, UFO.controlsHint
