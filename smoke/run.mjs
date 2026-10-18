@@ -1533,6 +1533,39 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
   ok(!types.has("lurker") && !types.has("warden"), `rifts only spawn what is unlocked there (${[...types].join(",")})`);
 }
 
+/* twenty levels, in the game itself: every one of them starts clean */
+{
+  let bad = 0;
+  const badAt = [];
+  for (let n = 1; n <= 20; n++) {
+    startL(n);
+    const s0 = UFO.startCell;
+    const ex = UFO.worldOf(UFO.exit.col, UFO.exit.row);
+    const around = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+      .map(([dc, dr]) => UFO.worldOf(s0.col + dc, s0.row + dr));
+    const issues = [];
+    if (UFO.stuck) issues.push("stuck");
+    if (UFO.holeAt(UFO.pos.x, UFO.pos.z)) issues.push("over-a-hole");
+    if (UFO.blockedAt(UFO.pos.x, UFO.pos.z)) issues.push("in-a-wall");
+    if (UFO.wallTopAt(UFO.pos.x, UFO.pos.z) > 0.1) issues.push("under-a-block");
+    if (around.every((w) => UFO.stuckAt(w.x, w.z) || UFO.holeAt(w.x, w.z))) issues.push("boxed-in");
+    if (UFO.holeAt(ex.x, ex.z)) issues.push("exit-over-a-hole");
+    if (UFO.pads.some((p) => UFO.holeAt(p.x, p.z) || UFO.stuckAt(p.x, p.z))) issues.push("pad-off-floor");
+    if (UFO.rifts.some((r) => UFO.holeAt(r.x, r.z))) issues.push("rift-over-a-hole");
+    if (issues.length) { bad++; badAt.push(`${n}:${issues.join("+")}`); }
+  }
+  ok(bad === 0, `all twenty levels start clean (${bad} bad${badAt.length ? ": " + badAt.join(" ") : ""})`);
+
+  // and a hole is a hole: pure black, never fogged, and nothing drawn over it
+  startL(5);
+  const look = UFO.pitLook;
+  ok(look.color === 0 && look.fog === false, `a hole is pure black and never fogged (${look.color}, fog ${look.fog})`);
+  ok(look.padY < look.y, `and the room pad is drawn under it (pad ${look.padY}, hole ${look.y})`);
+  ok(look.lipColor !== 0 && look.lipFog === false, `while the lip of the opening is drawn, unfogged too (${look.lipColor})`);
+  ok(UFO.holes.length > 0 && UFO.holes.length < UFO.pits.length,
+    `holes in the map are told apart from the rim of nothing (${UFO.holes.length} in, ${UFO.pits.length} with the rim)`);
+}
+
 /* a couple of frames of normal play after all that */
 frame(300);
 ok(!UFO.stuck, "still outside the walls after a long session");

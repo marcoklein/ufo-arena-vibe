@@ -492,5 +492,38 @@ for (const [lvl, cols, rows, count] of [[1, 25, 25, 2], [3, 29, 29, 3], [8, 39, 
   }
 }
 
+/* twenty levels, and nothing is ever built on the cell the run starts on */
+{
+  const shape = (n) => ({
+    cols: n <= 2 ? 13 + n * 2 : n === 3 ? 21 : Math.min(35, 23 + (n - 4) * 2),
+    rows: n <= 2 ? 13 + n * 2 : n === 3 ? 21 : Math.min(35, 23 + (n - 4) * 2),
+    seed: 1000 + n,
+    liftCount: n === 6 ? 3 : Math.min(6, 2 + Math.floor((n - 4) / 2)),
+    upper: n >= 4,
+    rooms: n <= 2 ? 2 : n === 3 ? 4 : 99,
+    startPad: n === 4 || n === 6,
+    startDeck: n === 4 || n === 6,
+    tower: 0.5,
+    // the places, as main.js hands them over
+    voidFloor: n === 6 || n === 11 || n === 16,
+    warren: n === 7 || n === 12 || n === 17,
+    roofed: n === 8 || n === 13 || n === 18,
+  });
+  let bad = 0;
+  for (let n = 1; n <= 20; n++) {
+    const L = createLevel(shape(n));
+    const key = `${L.start.col},${L.start.row}`;
+    const onFloor = !L.walls.has(key) && !L.pits.has(key) && !L.upper.has(key);
+    const around = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dc, dr]) => `${L.start.col + dc},${L.start.row + dr}`);
+    const boxed = around.every((a) => L.walls.has(a) || L.pits.has(a));
+    const exitKey = `${L.exit.col},${L.exit.row}`;
+    const exitOpen = !L.walls.has(exitKey) && !L.pits.has(exitKey);
+    const okLvl = onFloor && !boxed && exitOpen;
+    if (!okLvl) bad++;
+    ok(okLvl, `L${n}: the run starts on open floor and the exit is on ground (start ${key}, ${around.filter((a) => !L.walls.has(a) && !L.pits.has(a)).length}/4 ways out)`);
+  }
+  ok(bad === 0, `and all twenty levels are clean (${bad} bad)`);
+}
+
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL TESTS PASSED");
 process.exit(failures ? 1 : 0);

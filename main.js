@@ -578,10 +578,16 @@ const wallTex = wallTexture();
 // A hole is simply no floor: a flat, pure black square, square to the grid, and
 // only the lip of the opening is drawn. Where two holes meet there is no lip at
 // all, so a void run reads as one opening rather than a grid of tiles.
-const pitMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+//
+// Neither the hole nor its lip is fogged: fog tints a black square towards the fog
+// colour, which is exactly what made distant holes read as grey-blue tiles instead
+// of as nothing. A hole is black at any distance.
+const PIT_Y = 0.02;  // the hole itself
+const PAD_Y = 0.012; // the room pad, under it
+const pitMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false, fog: false });
 const pitEdgeMat = new THREE.MeshBasicMaterial({
   color: 0xd8eeff, transparent: true, opacity: 0.8,
-  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, fog: false,
 });
 const roofMat = new THREE.MeshStandardMaterial({
   color: 0x5d6a7e, map: wallTex, bumpMap: wallTex, bumpScale: 0.4,
@@ -763,7 +769,7 @@ function buildWorld(L) {
     const z = L.cellToWorldZ(r);
     const hole = new THREE.Mesh(pitGeo, pitMat);
     hole.rotation.x = -Math.PI / 2;
-    hole.position.set(x, 0.02, z);
+    hole.position.set(x, PIT_Y, z);
     worldGroup.add(hole);
     // only the lip, and only where the opening meets the floor
     for (const [dc, dr, geo] of [
@@ -843,13 +849,15 @@ function buildWorld(L) {
     }
   }
 
-  /* glowing floor pad marking out each room */
+  /* glowing floor pad marking out each room. It is drawn *under* the holes (which
+     are opaque black squares just above it), so a hole in a room is a hole and
+     nothing else - no glow, no artwork, just the lip of the opening. */
   for (const room of L.rooms) {
     const pad = new THREE.Mesh(padGeo, padMaterial(themeAt(room.theme) ?? 0));
     pad.rotation.x = -Math.PI / 2;
     pad.scale.set(room.w * CELL, room.h * CELL, 1);
     pad.position.set(
-      L.cellToWorldX(room.x + (room.w - 1) / 2), 0.025, L.cellToWorldZ(room.y + (room.h - 1) / 2)
+      L.cellToWorldX(room.x + (room.w - 1) / 2), PAD_Y, L.cellToWorldZ(room.y + (room.h - 1) / 2)
     );
     worldGroup.add(pad);
   }
@@ -4172,6 +4180,18 @@ globalThis.UFO = {
     return { col: c, row: r, x: level.cellToWorldX(c), z: level.cellToWorldZ(r) };
   }); },
   get vaults() { return level.vaults; },
+  // what a hole looks like: pure black, never fogged, and drawn above the room pads
+  get pitLook() {
+    return {
+      color: pitMat.color.getHex(), fog: pitMat.fog, y: PIT_Y,
+      padY: PAD_Y, lipColor: pitEdgeMat.color.getHex(), lipFog: pitEdgeMat.fog,
+    };
+  },
+  // the holes in the floor, with the band of nothing round the map left out
+  get holes() { return [...level.pits].filter((k) => !level.rim.has(k)).map((key) => {
+    const [c, r] = key.split(",").map(Number);
+    return { col: c, row: r, x: level.cellToWorldX(c), z: level.cellToWorldZ(r) };
+  }); },
   // the band of nothing round the map (the only holes on the first levels)
   get rim() { return [...level.rim].map((key) => {
     const [c, r] = key.split(",").map(Number);

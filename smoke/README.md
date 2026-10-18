@@ -40,6 +40,11 @@ It also checks the two levels and the holes in them:
   a hole. Room holes keep a cell clear of every room edge; a *void* run is a
   corridor segment with no floor at all, taken only if the walk from the start
   survives it - so a void is a shortcut or a risk, never the only road;
+* nothing is ever built on, or right beside, the cell the run starts on, on any of
+  the twenty levels: the courtyard, the deck and the pillars all refuse those five
+  cells, and a last pass clears the start cell whatever happened. A craft that
+  starts inside a block, or boxed in by one, is a bug rather than a level - level
+  12 used to start inside a courtyard ring;
 * a roof is a tunnel: solid in the level above, open on the floor, and never over
   a hole or a pad. There are more of them the bigger the map, because they are what
   stops the level above from being a free flight path over everything;
@@ -141,6 +146,16 @@ start screen.
 node --import ./smoke/loader.mjs smoke/run.mjs
 ```
 
+### Twenty levels, in the game — `smoke/run.mjs`
+
+The gameplay suite ends by starting all twenty levels in turn and checking each one
+comes up clean: the craft is on open floor and not inside anything, it is not boxed
+in, the exit is on ground, and no pad or spawner is standing in a hole. It also
+checks what a hole *is* - pure black, never fogged, with the room pad drawn under
+it - because fog used to tint distant holes towards the fog colour and read as
+grey-blue tiles, and the room pad used to be drawn *over* a hole, so a hole in a
+room glowed. A hole now has no artwork in it at all, only the lip of the opening.
+
 ## 3. Gameplay in a real browser — `smoke/browser.html`
 
 Loads the real markup, styles and three.js from `../index.html`, renders real
@@ -203,7 +218,10 @@ level: altitude, meter, whether a block is underneath, whether a wall still bloc
 and what the wardens up there are doing),
 `&holes=1` (drive onto a hole and report that it is open, that there is no ground,
 that the thruster is holding the craft up and what the HUD says),
-`&settle=N` (let the level run by itself for N frames before the probe reads it).
+`&settle=N` (let the level run by itself for N frames before the probe reads it),
+`&pixel=1` (read the rendered frame back and report a few pixel colours, so a claim
+like "a hole is pure black" is a number: `?level=5&pose=holeTop&pixel=1` reports
+`[0,0,0]` for the hole under the camera).
 `&level=N` picks the level a pose or probe runs on; without it the pose picks the
 level that introduces what it shows (a spitter on 2, a shade on 3, a lift pad on
 4, spawners on 5, a warden on 6). The first two levels, and the spawner level,
@@ -308,7 +326,8 @@ UFO.pads, UFO.blocks, UFO.highWalls, UFO.wallTopAt(x, z), UFO.blockedAt(x, z)
 UFO.lift, UFO.alt, UFO.charge, UFO.liftUp, UFO.onBlock, UFO.liftCfg
 UFO.wardens, UFO.levelNow       // the thing up top, and which level the craft is on
 UFO.hoverFx                     // the thruster: visible exactly while it is paying to stay up
-UFO.pits, UFO.rim, UFO.voids, UFO.roofs, UFO.vaults, UFO.holeAt(x, z), UFO.overHole
+UFO.pits, UFO.holes, UFO.rim, UFO.voids, UFO.roofs, UFO.vaults, UFO.holeAt(x, z), UFO.overHole
+UFO.pitLook                     // a hole is pure black, unfogged, and the pad is under it
 UFO.towerness, UFO.towers, UFO.monoliths   // this level's character
 UFO.camPos                      // where the chase camera ended up (is it jammed?)
 UFO.falling                     // > 0 while it is dropping out of the world

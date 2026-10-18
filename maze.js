@@ -256,14 +256,21 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor 
     return grid[rr] && grid[rr][cc] === "." && !roomCells.has(`${cc},${rr}`);
   });
   const clear = (c, r) => grid[r] && grid[r][c] === "." && !doorway(c, r);
+  // The cell the run starts on, and the four cells around it, are never built on
+  // and never drilled: a craft that starts inside a block, or boxed in by one, is
+  // a bug rather than a level. The room you start in is never *given* a build, but
+  // a courtyard, a deck or a pillar can still land in it.
+  const startCell = { col: rooms[0].cx, row: rooms[0].cy };
+  const nearStart = (c, r) =>
+    Math.abs(c - startCell.col) + Math.abs(r - startCell.row) <= 1;
   const raise = (c, r) => {
-    if (!clear(c, r)) return false;
+    if (nearStart(c, r) || !clear(c, r)) return false;
     grid[r][c] = "#";
     upper.add(`${c},${r}`);
     return true;
   };
   const drill = (c, r) => {
-    if (!clear(c, r)) return false;
+    if (nearStart(c, r) || !clear(c, r)) return false;
     grid[r][c] = "#";
     holes.add(`${c},${r}`);
     return true;
@@ -337,10 +344,10 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor 
     for (let attempt = 0; attempt < 8; attempt++) {
       const cx = room.x + Math.floor(rng() * (room.w - SIDE + 1));
       const cy = room.y + Math.floor(rng() * (room.h - SIDE + 1));
-      // a courtyard round the cell the run starts on would trap the craft in its
-      // own landing pad
+      // a courtyard anywhere near the cell the run starts on would trap the craft
+      // in its own landing pad - or build its ring straight over it
       if (keepOut &&
-          Math.abs(cx + mid - keepOut.col) <= 1 && Math.abs(cy + mid - keepOut.row) <= 1) continue;
+          Math.abs(cx + mid - keepOut.col) <= 3 && Math.abs(cy + mid - keepOut.row) <= 3) continue;
       const ring = [];
       for (let r = cy; r < cy + SIDE; r++) {
         for (let c = cx; c < cx + SIDE; c++) {
@@ -729,6 +736,24 @@ export function createLevel({
         const d = Math.hypot(c - start.col, r - start.row);
         if (d > best + 1e-6) { best = d; exit = { col: c, row: r }; }
       }
+    }
+  }
+
+  // The cell the run starts on is floor, full stop. Everything above already
+  // refuses to build there; this is the belt to that pair of braces, and it also
+  // catches the start room's own deck and any pillar that survived.
+  {
+    const key = `${start.col},${start.row}`;
+    if (upper.has(key) || pits.has(key) || walls.has(key)) {
+      if (upper.has(key)) { upper.delete(key); stats.upper--; }
+      if (pits.has(key)) { pits.delete(key); stats.pits--; }
+      grid[start.row][start.col] = ".";
+      walls.delete(key);
+      wallKind.delete(key);
+      openCells.push([start.col, start.row]);
+    }
+    for (let i = vaults.length - 1; i >= 0; i--) {
+      if (vaults[i].col === start.col && vaults[i].row === start.row) vaults.splice(i, 1);
     }
   }
 

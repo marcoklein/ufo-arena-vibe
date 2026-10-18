@@ -243,17 +243,21 @@
         }
         await frames(16);
       } else if (pose === "holeTop") {
-        // straight down over a hole: the flat black square and its lip
-        const h = UFO.pits[0];
+        // straight down over a hole in the map, with floor round it: the flat black
+        // square and its lip. It has to be a hole with ground on every side, or the
+        // camera ends up looking out over the rim of nothing.
+        let h = UFO.holes.find((p) =>
+          !UFO.holeAt(p.x + 4, p.z) && !UFO.holeAt(p.x - 4, p.z) &&
+          !UFO.holeAt(p.x, p.z + 4) && !UFO.holeAt(p.x, p.z - 4)) || UFO.holes[0] || UFO.pits[0];
         if (h) {
           UFO.move(h.x + 4, h.z);
-          UFO.cam(h.x, 15, h.z + 11, h.x, 0, h.z);
+          UFO.cam(h.x, 11, h.z + 7, h.x, 0, h.z);
         }
         await frames(16);
       } else if (pose === "pit") {
         // a hole in the floor, right in front of the craft
         let h = null;
-        for (const p of UFO.pits) {
+        for (const p of UFO.holes) {
           if (vantage(p.x, p.z, 7)) { h = p; break; }
         }
         h = h || UFO.pits[0];
@@ -663,6 +667,7 @@
           // the start screen and what it remembers between sessions
           menu: UFO.inMenu,
           place: UFO.place,
+          holesInMap: (UFO.holes || []).length,
           lamp: UFO.lamp,
           save: UFO.save,
           savedRaw: (() => { try { return localStorage.getItem("ufo-arena.save"); } catch { return "n/a"; } })(),
@@ -681,6 +686,33 @@
           audio,
         });
         document.body.appendChild(pre);
+      }
+
+      // ?pixel=1 — sample the rendered frame, so a claim like "a hole is pure black
+      // and has no artwork in it" can be checked as a number
+      if (q.has("pixel")) {
+        const src = document.querySelector("canvas");
+        const cv = document.createElement("canvas");
+        cv.width = src.width;
+        cv.height = src.height;
+        const ctx = cv.getContext("2d");
+        const img = new Image();
+        await new Promise((res) => { img.onload = res; img.onerror = res; img.src = src.toDataURL("image/png"); });
+        ctx.drawImage(img, 0, 0);
+        const at = (fx, fy) => {
+          const d = ctx.getImageData(Math.floor(cv.width * fx), Math.floor(cv.height * fy), 1, 1).data;
+          return [d[0], d[1], d[2]];
+        };
+        const out = document.createElement("pre");
+        out.id = "pixels";
+        out.style.display = "none";
+        out.textContent = JSON.stringify({
+          size: [cv.width, cv.height],
+          centre: at(0.5, 0.5), mid1: at(0.5, 0.42), mid2: at(0.5, 0.58),
+          left: at(0.35, 0.5), right: at(0.65, 0.5),
+          cam: UFO.camPos, hole: UFO.holes[0], place: UFO.place,
+        });
+        document.body.appendChild(out);
       }
 
       // ?data — hand the rendered frame back as a data URL so a headless run
