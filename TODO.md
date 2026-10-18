@@ -10,7 +10,8 @@ it is implemented **and** checked by the test layers in `smoke/README.md`.
 
 ## Next
 
-- [ ] Music: a short sting when a level starts and when the exit is reached.
+- [ ] The score swaps key and tempo with a hard cut between levels; a bar of intro
+      and outro would make the seam musical (the exit and level-up stings exist).
 - [ ] More melody still: a counter-line under the motif once the levels get busy.
 - [ ] Refresh `PLAN.md` (it still describes the pre-combat single-maze game) or fold it into this file.
 
