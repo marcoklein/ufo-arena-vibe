@@ -102,7 +102,7 @@ const SPEC = `(async () => {
   const measure = window.MEASURE;
   const names = ["shoot", "hit", "kill", "killShade", "enemyShot", "boom", "mineArm",
     "mineBeep", "hurt", "death", "exit", "levelUp", "rift", "shadeWake", "shadeCharge", "shadeCrash",
-    "liftUp", "liftWarn", "liftFall", "liftLand", "wardenWake", "wardenShot",
+    "liftUp", "liftWarn", "liftFall", "liftLand", "voidFall", "wardenWake", "wardenShot",
     "globHit", "shadeSettle"];
   const t0 = performance.now();
 

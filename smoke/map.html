@@ -12,28 +12,34 @@
     <!--
       Draws the generated layout flat, so the shape of a level can be judged at a
       glance: rooms in their theme colour, corridors in grey, dead ends visible,
-      start green, exit gold. Screenshot it with Chrome:
+      start green, exit gold. Both levels are in it:
 
-        node smoke/shot.mjs smoke/out/map.png "&pose=..."   (no)
-
-        Two levels: raised runs in warm brown (the block tops you drive on),
-        lift pads as cyan rings, the floor as grey.
+        gold      low blocks: the tops you drive on one level up
+        black     holes in the floor: no ground at all, hover across or fall
+        cyan ring a lift pad (the one inside a vault is the way out of it)
+        magenta   the pocket of a vault: sealed on the floor, open from above
 
         /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
           --headless=new --no-sandbox --window-size=900,900 \
           --screenshot=smoke/out/map.png \
           "http://127.0.0.1:8000/smoke/map.html?level=8"
+
+      The level's own options come from the same ladder main.js uses: the level
+      above and its holes only exist from level 4 on.
     -->
     <script type="module">
-      import { createLevel, CELL } from "../maze.js";
+      import { createLevel } from "../maze.js";
       import { THEMES } from "../themes.js";
 
       const q = new URLSearchParams(location.search);
       const lvl = Number(q.get("level") || 1);
-      const size = Math.min(45, 23 + lvl * 2);
+      const size = lvl <= 2 ? 11 + lvl * 2 : lvl === 3 ? 21 : Math.min(35, 23 + (lvl - 4) * 2);
+      const upper = lvl >= 4;              // UNLOCK.upper
+      const liftCount = upper ? Math.min(6, 2 + Math.floor((lvl - 4) / 2)) : 0;
       const L = createLevel({
-        cols: size, rows: size, seed: 1000 + lvl,
-        liftCount: Math.min(6, 2 + Math.floor((lvl - 1) / 2)),
+        cols: size, rows: size, seed: 1000 + lvl, liftCount, upper,
+        rooms: lvl <= 2 ? 2 : lvl === 3 ? 4 : 99,
+        startPad: lvl === 4, startDeck: lvl === 4,
       });
 
       const scale = Math.max(6, Math.floor(880 / size));
@@ -48,7 +54,7 @@
       const hex = (n) => `#${n.toString(16).padStart(6, "0")}`;
       const px = (c) => c * scale;
 
-      // free space
+      // free floor
       for (const [c, r] of L.openCells) {
         ctx.fillStyle = "#222c38";
         ctx.fillRect(px(c), px(r), scale, scale);
@@ -79,9 +85,53 @@
         ctx.fillRect(px(c), px(r), scale, scale);
       }
 
+      // holes: no floor, nothing on top of it. Pure black, and only the lip of the
+      // opening is drawn - where two holes meet there is no line between them
+      for (const key of L.pits) {
+        const [c, r] = key.split(",").map(Number);
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(px(c), px(r), scale, scale);
+      }
+      ctx.strokeStyle = "rgba(160,215,255,0.7)";
+      ctx.lineWidth = Math.max(1, scale * 0.1);
+      for (const key of L.pits) {
+        const [c, r] = key.split(",").map(Number);
+        const lip = (dc, dr, x1, y1, x2, y2) => {
+          if (L.pits.has(`${c + dc},${r + dr}`)) return;
+          ctx.beginPath();
+          ctx.moveTo(px(c) + x1 * scale, px(r) + y1 * scale);
+          ctx.lineTo(px(c) + x2 * scale, px(r) + y2 * scale);
+          ctx.stroke();
+        };
+        lip(0, -1, 0, 0, 1, 0);
+        lip(0, 1, 0, 1, 1, 1);
+        lip(-1, 0, 0, 0, 0, 1);
+        lip(1, 0, 1, 0, 1, 1);
+      }
+
+      // tunnels: a roof over a corridor, solid only one level up
+      for (const key of L.roofs) {
+        const [c, r] = key.split(",").map(Number);
+        ctx.strokeStyle = "#7fd4ff";
+        ctx.lineWidth = Math.max(1, scale * 0.14);
+        ctx.beginPath();
+        ctx.moveTo(px(c) + scale * 0.2, px(r) + scale * 0.5);
+        ctx.lineTo(px(c) + scale * 0.8, px(r) + scale * 0.5);
+        ctx.stroke();
+      }
+
+      // vaults: the pocket is sealed on the floor and opens from above
+      for (const v of L.vaults) {
+        ctx.strokeStyle = "#ff5db1";
+        ctx.lineWidth = Math.max(1.5, scale * 0.2);
+        ctx.beginPath();
+        ctx.arc(px(v.col) + scale / 2, px(v.row) + scale / 2, scale * 0.42, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
       // lift pads: the way up onto those runs
       for (const l of L.lifts) {
-        ctx.strokeStyle = "#5ef0ff";
+        ctx.strokeStyle = l.vault ? "#b06bff" : "#5ef0ff";
         ctx.lineWidth = Math.max(1.5, scale * 0.22);
         ctx.beginPath();
         ctx.arc(px(l.col) + scale / 2, px(l.row) + scale / 2, scale * 0.62, 0, Math.PI * 2);
@@ -106,7 +156,7 @@
       dot(L.start.col, L.start.row, "#2ee6a6");
       dot(L.exit.col, L.exit.row, "#ffd23f");
 
-      document.title = `L${lvl} ${size}x${size} rooms=${L.rooms.length} links=${L.stats.links} tight=${L.stats.tight} stubs=${L.stats.stubs} upper=${L.upper.size} pads=${L.lifts.length}`;
+      document.title = `L${lvl} ${size}x${size} rooms=${L.rooms.length} links=${L.stats.links} tight=${L.stats.tight} stubs=${L.stats.stubs} upper=${L.upper.size} holes=${L.pits.size} voids=${L.stats.voids} roofs=${L.roofs.size} vaults=${L.vaults.length} pads=${L.lifts.length}`;
       const out = document.createElement("pre");
       out.id = "info";
       out.style.color = "#9fb0c4";

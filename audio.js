@@ -302,6 +302,12 @@ const SFX = {
     noiseHit(rig, t, { dur: 0.4, peak: 0.3, lp: 1600, sweep: 140, ...o });
     tone(rig, t, { type: "triangle", f0: 220, f1: 140, dur: 0.2, peak: 0.1, spread: 40, ...o });
   },
+  // and there was no floor: the long one, all the way down
+  voidFall(rig, t, o) {
+    noiseHit(rig, t, { dur: 1.6, peak: 0.26, bp: 2600, sweep: 90, q: 0.6, ...o });
+    tone(rig, t, { type: "sine", f0: 300, f1: 28, dur: 1.5, peak: 0.24, a: 0.02, ...o });
+    tone(rig, t + 0.5, { type: "triangle", f0: 160, f1: 22, dur: 1.1, peak: 0.12, ...o });
+  },
   // a warden glob bursting on the hull: wet, and the hover going with it
   globHit(rig, t, o) {
     noiseHit(rig, t, { dur: 0.24, peak: 0.28, lp: 950, sweep: 180, ...o });

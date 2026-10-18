@@ -19,13 +19,29 @@ random walk never leaves the craft buried in a wall.
 node test.mjs
 ```
 
-It also checks the two levels: the raised runs (a run of low blocks is what the
-craft drives on up there, and the gaps between them are what it hovers over) are
-inside rooms with a cell to spare at every edge, never on a doorway approach,
-never on the start or exit cell, and at least one lift pad stands beside one. The
-pads themselves are two and up per level, each on open floor with room around it,
-in its own cell, not on the start or the exit, reachable on foot, and one of them
-a short run from the exit.
+It also checks the two levels and the holes in them:
+
+* the raised decks (a run of low blocks is what the craft drives on up there, and
+  the gaps between them are what it hovers over) stay inside rooms with a cell to
+  spare at every edge, never on a doorway approach, never on the start or exit
+  cell, and at least one lift pad stands beside one;
+* a vault is a sealed ring of blocks with a pocket of floor and a pad inside it -
+  the only way in is to hover over the ring - and it really is sealed on all four
+  sides;
+* a hole is not a wall: it is a cell with no ground. `hitsWall` (the craft) lets
+  it through, `hitsGround` (anything that walks) does not, and `holeAt` says it is
+  a hole. Room holes keep a cell clear of every room edge; a *void* run is a
+  corridor segment with no floor at all, taken only if the walk from the start
+  survives it - so a void is a shortcut or a risk, never the only road;
+* a roof is a tunnel: solid in the level above, open on the floor, and never over
+  a hole or a pad;
+* the pads themselves are one and up per level, each on open floor with room
+  around it, in its own cell, not on the start or the exit, reachable on foot, and
+  one of them a short run from the exit. The level that introduces the lift also
+  gets a pad (and a small deck) in the room you start in.
+
+The first two levels are built with two rooms and nothing else, so the first
+lesson has nowhere to hide.
 
 ## 2. Gameplay in Node — `smoke/run.mjs`
 
@@ -40,9 +56,14 @@ mine underneath that cannot latch on, the thruster lit only while it is paying t
 stay up), meets a warden up there and checks that it sleeps while the craft is on
 the floor, that it wakes, spits and dies on its own level, and that a glob drinks
 the hover and throws the craft back, wakes a shade and then walks out of its reach
-to watch it give up, counts what the spitters are carrying, checks that the
+to watch it give up, counts what the spitters are carrying, walks the whole
+ladder (level 1 is six red diamonds in two rooms, 2 adds spitters, 3 the shade, 4
+the lift and a pad where you start, 5 a room full of spawners, 6 the warden),
+drives onto a hole and checks the same meter holds it up on the floor as one level
+up and that running dry drops it out of the world, checks that a tunnel is open
+underneath and solid above, that no mote drifts through the hull, checks that the
 score is only poked by things worth scoring, reaches the exit, advances a level,
-dies and restarts.
+dies and restarts, and presses F for fullscreen.
 
 ```
 node --import ./smoke/loader.mjs smoke/run.mjs
@@ -87,7 +108,11 @@ Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 `block` (the craft up one level, standing over a low block), `run` (a raised run
 from the floor, so both levels are in one frame), `warden` (up on the block level
 with a warden, caught winding a glob up), `hover` (up on the block level with the
-meter running, so the thruster is lit). Extras: `&boom=enemy|player`
+meter running, so the thruster is lit), `pit` (a hole in the floor, a few paces
+ahead), `pitair` (standing on a deck at the lip of a hole), `holeTop` (straight
+down over a hole: the flat black square and its lip), `tunnel` (down under a roof,
+where the level above is closed), `spawners` (the introduction level, after a
+couple of them have opened). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
@@ -97,8 +122,15 @@ shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
 the seed it spits is in the air), `&lift=1` (take a pad up one level and report the
 level: altitude, meter, whether a block is underneath, whether a wall still blocks,
 and what the wardens up there are doing),
+`&holes=1` (drive onto a hole and report that it is open, that there is no ground,
+that the thruster is holding the craft up and what the HUD says),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
-The probe also reports `shots` (how many of each kind are in the air).
+`&level=N` picks the level a pose or probe runs on; without it the pose picks the
+level that introduces what it shows (a spitter on 2, a shade on 3, a lift pad on
+4, spawners on 5, a warden on 6). The probe reports `shots` (how many of each kind
+are in the air), the ladder (what is unlocked and how many of each), the upper
+level (holes, voids, roofs, vaults, decks, pads and how far the nearest pad is from
+the start), the dust pocket, the arrival tip and the hint line.
 
 ## 5. Sound — `smoke/audio.mjs` (+ `smoke/audio.html`)
 
@@ -148,9 +180,11 @@ keyboard's rollover rather than the game.
 
 Draws the generated layout flat so the shape of a level can be judged at a
 glance: rooms outlined in their theme colour, corridors in grey, dead ends
-visible, start green, exit gold. Both levels are in it: the raised runs (the
-block tops that make up the level above the floor) in gold, and the lift pads as
-cyan rings. Needs the dev server.
+visible, start green, exit gold. Both levels are in it: the raised decks (the
+block tops that make up the level above the floor) in gold, the lift pads as cyan
+rings (violet for the one in a vault), vault pockets in magenta, holes as pure
+black with only the lip drawn, and tunnels as a short bar across the corridor.
+Needs the dev server.
 
 ```
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -173,6 +207,13 @@ UFO.pads, UFO.blocks, UFO.highWalls, UFO.wallTopAt(x, z), UFO.blockedAt(x, z)
 UFO.lift, UFO.alt, UFO.charge, UFO.liftUp, UFO.onBlock, UFO.liftCfg
 UFO.wardens, UFO.levelNow       // the thing up top, and which level the craft is on
 UFO.hoverFx                     // the thruster: visible exactly while it is paying to stay up
+UFO.pits, UFO.voids, UFO.roofs, UFO.vaults, UFO.holeAt(x, z), UFO.overHole
+UFO.falling                     // > 0 while it is dropping out of the world
+UFO.dust, UFO.dustBubble        // the motes, and the pocket kept clear round the craft
+UFO.ladder, UFO.tip, UFO.controlsHint
+UFO.start(n)                    // jump straight to a level (the tests use this)
+UFO.cam(x, y, z, tx, ty, tz)    // test-only camera override for a still, UFO.camOff()
+UFO.despawn(e)                  // quietly remove one enemy (test scaffolding)
 UFO.bullets[0].level            // every shot carries the level it was fired on
 UFO.move(x, z), UFO.aim(x, z), UFO.damage(n), UFO.kill(), UFO.killPlayer(), UFO.stuckAt(x, z)
 

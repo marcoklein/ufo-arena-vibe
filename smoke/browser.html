@@ -67,11 +67,31 @@
       const key = (type, code) =>
         window.dispatchEvent(new KeyboardEvent(type, { code, bubbles: true, cancelable: true }));
 
-      // ?pose=enemy — park next to a monster and face it.
-      // ?pose=exit  — park on the exit so the goal marker is in view.
-      const pose = new URLSearchParams(location.search).get("pose");
+      // ?pose=... — pick a level that actually has what the pose needs, unless
+      // ?level=N says otherwise. The ladder hands out one mechanic per level, so
+      // a pose of a spitter has to be shot on level 2, a warden on level 5, ...
+      const q = new URLSearchParams(location.search);
+      const pose = q.get("pose");
 
       await frames(5);
+      {
+        const needs = {
+          pad: 4, block: 4, run: 4, deck: 4, hover: 4, vault: 5, pit: 4, pitair: 4,
+          tunnel: 4, spawners: 5, holeTop: 4, warden: 6, lurk: 3, shade: 3, rift: 5,
+        };
+        let want = Number(q.get("level") || 0);
+        if (!want) {
+          want = needs[pose] || 1;
+          if (q.has("hunt")) want = Math.max(want, 3);
+          if (q.get("boom") === "seeds") want = Math.max(want, 2);
+          if (q.has("lift") || q.has("upper") || q.has("holes")) want = Math.max(want, 4);
+        }
+        if (want !== 1) {
+          UFO.start(want);
+          await frames(3);
+        }
+      }
+
       const start = { x: UFO.pos.x, z: UFO.pos.z, hp: UFO.hp };
       let moved = 0;
       let peakBullets = 0;
@@ -84,6 +104,7 @@
           if (UFO.stuckAt(x, z)) continue;
           if (UFO.stuckAt(tx + dx * dist * 0.55, tz + dz * dist * 0.55)) continue; // wall in the way
           if (UFO.stuckAt(x + dx * 9.5, z + dz * 9.5)) continue;                   // chase camera needs room behind us
+          if (UFO.wallTopAt(x, z) > 3 || UFO.wallTopAt(x + dx * 9.5, z + dz * 9.5) > 3) continue; // no tunnel roof either
           return { x, z };
         }
         return null;
@@ -96,14 +117,14 @@
         await frames(30);
       } else if (pose === "pad") {
         // a lift pad seen from the floor, from far enough to judge the markings
-        const p = UFO.pads[0];
+        const p = UFO.pads.find((x) => !x.vault);
         const v = vantage(p.x, p.z, 9) || { x: p.x + 7, z: p.z + 7 };
         UFO.move(v.x, v.z);
         UFO.aim(p.x, p.z);
         await frames(24);
       } else if (pose === "block") {
         // up one level, standing over the nearest low block
-        const p = UFO.pads[0];
+        const p = UFO.pads.find((x) => !x.vault);
         UFO.move(p.x, p.z);
         await frames(50);
         const b = UFO.blocks.reduce((best, w) => {
@@ -116,7 +137,7 @@
         }
       } else if (pose === "run") {
         // the raised run seen from the floor: the level above, from below
-        const p = UFO.pads[0];
+        const p = UFO.pads.find((x) => !x.vault);
         const b = UFO.blocks.reduce((best, w) => {
           const d = Math.hypot(w.x - p.x, w.z - p.z);
           return !best || d < best.d ? { ...w, d } : best;
@@ -133,7 +154,7 @@
         if (w) {
           const pad = UFO.pads.reduce(
             (best, p) => (Math.hypot(p.x - w.x, p.z - w.z) < Math.hypot(best.x - w.x, best.z - w.z) ? p : best),
-            UFO.pads[0],
+            UFO.pads.find((x) => !x.vault),
           );
           UFO.move(pad.x, pad.z);
           await frames(50);
@@ -161,11 +182,92 @@
         }
       } else if (pose === "hover") {
         // up on the block level over open floor, meter running: thruster lit
-        const p = UFO.pads[0];
+        const p = UFO.pads.find((x) => !x.vault);
         UFO.move(p.x, p.z);
         await frames(40);
         for (let i = 0; i < 260 && UFO.charge > 0.8; i++) await frames(1);
         await frames(2);
+      } else if (pose === "holeTop") {
+        // straight down over a hole: the flat black square and its lip
+        const h = UFO.pits[0];
+        if (h) {
+          UFO.move(h.x + 4, h.z);
+          UFO.cam(h.x, 15, h.z + 11, h.x, 0, h.z);
+        }
+        await frames(16);
+      } else if (pose === "pit") {
+        // a hole in the floor, right in front of the craft
+        let h = null;
+        for (const p of UFO.pits) {
+          if (vantage(p.x, p.z, 7)) { h = p; break; }
+        }
+        h = h || UFO.pits[0];
+        if (h) {
+          const v = vantage(h.x, h.z, 7) || { x: h.x + 6, z: h.z };
+          UFO.move(v.x, v.z);
+          UFO.aim(h.x, h.z);
+        }
+        await frames(26);
+      } else if (pose === "pitair") {
+        // on the deck, standing at the lip of a hole: the gap in the level above
+        const p = UFO.pads.find((x) => !x.vault);
+        UFO.move(p.x, p.z);
+        await frames(50);
+        let best = null;
+        for (const h of UFO.pits) {
+          for (const b of UFO.blocks) {
+            const d = Math.hypot(b.x - h.x, b.z - h.z);
+            if (Math.abs(d - 4) < 0.01 && (!best || d < best.d)) best = { h, b, d };
+          }
+        }
+        if (best) {
+          UFO.move(best.b.x, best.b.z);
+          await frames(4);
+          UFO.aim(best.h.x, best.h.z);
+          await frames(16);
+        }
+      } else if (pose === "tunnel") {
+        // down under a roof, looking along the corridor: the level above is closed
+        // here, so the only way through is on the floor
+        const r = UFO.roofs[0];
+        if (r) {
+          const alongX = !UFO.stuckAt(r.x + 4, r.z) && !UFO.stuckAt(r.x - 4, r.z);
+          UFO.move(r.x, r.z);                       // right under the ceiling
+          UFO.aim(r.x + (alongX ? 4 : 0), r.z + (alongX ? 0 : 4));
+        }
+        await frames(20);
+      } else if (pose === "spawners") {
+        // the introduction level: the starting room, with its rifts round it
+        await frames(150);   // let one or two of them get going
+        const r = UFO.rifts.reduce((b, x) => {
+          const d = Math.hypot(x.x - UFO.pos.x, x.z - UFO.pos.z);
+          return !b || d > b.d ? { ...x, d } : b;
+        }, null);
+        if (r) UFO.aim(r.x, r.z);
+        await frames(10);
+      } else if (pose === "vault") {
+        // the sealed courtyard: a ring of blocks with a pad in the pocket
+        const v = UFO.vaults[0];
+        if (v) {
+          const w = UFO.worldOf(v.col, v.row);
+          const from = vantage(w.x, w.z, 10) || { x: w.x + 8, z: w.z };
+          UFO.move(from.x, from.z);
+          UFO.aim(w.x, w.z);
+        }
+        await frames(26);
+      } else if (pose === "deck") {
+        // a raised deck with a hole in it, seen from the deck itself
+        const p = UFO.pads.find((x) => !x.vault);
+        UFO.move(p.x, p.z);
+        await frames(50);
+        const b = UFO.blocks.reduce((best, w) => {
+          const d = Math.hypot(w.x - p.x, w.z - p.z);
+          return !best || d < best.d ? { ...w, d } : best;
+        }, null);
+        if (b) {
+          UFO.move(b.x, b.z);
+          await frames(20);
+        }
       } else if (pose === "mine") {
         // an armed-adjacent look at one mine from outside its arming range
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
@@ -344,7 +446,7 @@
       // ?lift=1 — take a pad up one level and report what the level does
       const liftInfo = {};
       if (new URLSearchParams(location.search).has("lift")) {
-        const pad = UFO.pads[0];
+        const pad = UFO.pads.find((x) => !x.vault);
         UFO.move(pad.x, pad.z);
         await frames(45);
         liftInfo.up = +UFO.lift.toFixed(2);
@@ -386,6 +488,25 @@
         }
       }
 
+      // ?holes=1 — a hole is no ground: open to the craft, but the meter holds it
+      const holeInfo = {};
+      if (q.has("holes")) {
+        const h = UFO.pits[0];
+        if (h) {
+          holeInfo.cells = UFO.pits.length;
+          holeInfo.openAtFloor = !UFO.stuckAt(h.x, h.z);
+          holeInfo.groundThere = UFO.holeAt(h.x, h.z);
+          UFO.move(h.x, h.z);
+          await frames(24);
+          holeInfo.overHole = UFO.overHole;
+          holeInfo.thruster = UFO.hoverFx.visible;
+          holeInfo.charge = +UFO.charge.toFixed(2);
+          holeInfo.label = document.getElementById("liftlab").textContent;
+          holeInfo.hudOn = document.getElementById("lift").classList.contains("on");
+          holeInfo.falling = UFO.falling;
+        }
+      }
+
       // ?audio=1 — the live half of the sound check in a real browser: does the
       // engine come up on the first gesture, does the score run on its own
       // clock, does M silence it and does the HUD say so. (What the sounds
@@ -416,8 +537,23 @@
       }
 
       // ?settle=N — let the level run on by itself before the probe reads it
-      const settle = Number(new URLSearchParams(location.search).get("settle") || 0);
+      const settle = Number(q.get("settle") || 0);
       if (settle > 0) await frames(settle);
+
+      // the dust field keeps a pocket clear round the craft, so no mote is ever
+      // seen cutting through the saucer
+      const dust = { bubble: UFO.dustBubble, inside: 0 };
+      {
+        const a = UFO.dust;
+        const cy = 1.6 + UFO.alt;
+        for (let i = 0; i < a.length / 3; i++) {
+          const dx = a[i * 3] - UFO.pos.x;
+          const dz = a[i * 3 + 2] - UFO.pos.z;
+          const dy = a[i * 3 + 1] - cy;
+          if (Math.abs(dy) < dust.bubble.y - 0.5 &&
+              dx * dx + dz * dz < (dust.bubble.r - 0.5) * (dust.bubble.r - 0.5)) dust.inside++;
+        }
+      }
 
       // ?shot — skip the probe so a screenshot shows only the game.
       if (!location.search.includes("shot")) {
@@ -444,6 +580,28 @@
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
           soundTag: document.getElementById("snd") && document.getElementById("snd").textContent,
+          hint: document.getElementById("hint") && document.getElementById("hint").textContent,
+          controls: UFO.controlsHint,
+          tip: UFO.tip.text,
+          ladder: UFO.ladder,
+          upper: {
+            pits: UFO.pits.length,
+            voids: UFO.stats.voids,
+            roofs: UFO.roofs.length,
+            vaults: UFO.vaults.length,
+            blocks: UFO.blocks.length,
+            pads: UFO.pads.length,
+            vaultPads: UFO.pads.filter((p) => p.vault).length,
+            padFromStart: +Math.min(...UFO.pads.filter((p) => !p.vault)
+              .map((p) => Math.hypot(p.x - start.x, p.z - start.z))).toFixed(1),
+            onBlock: UFO.onBlock,
+            charge: +UFO.charge.toFixed(2),
+            overHole: UFO.overHole,
+          },
+          rooms: UFO.rooms.length,
+          dust,
+          holes: holeInfo,
+          falling: UFO.falling,
           lift: liftInfo,
           shots: { mine: UFO.bullets.length, theirs: UFO.eBullets.length, seeds: UFO.eBullets.filter((b) => b.seed).length },
           mine,

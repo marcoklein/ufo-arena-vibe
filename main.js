@@ -102,13 +102,33 @@ const WALL_STYLE = {
 const CROWN_COOL = 0x49b8ff;
 const CROWN_WARM = 0xffa53d;
 
-const levelSize = (n) => Math.min(45, 23 + n * 2);    // grid is N x N
-const levelEnemies = (n) => Math.min(30, 5 + n * 2);  // roaming hunters
-const levelGuards = (n) => Math.min(12, 2 + n);       // defenders ringing the exit
-const levelLurkers = (n) => Math.min(4, 1 + Math.floor((n - 1) / 2)); // shades
-const levelRifts = (n) => Math.min(8, 3 + Math.floor(n / 2));         // spawn points
-const levelLifts = (n) => Math.min(6, 2 + Math.floor((n - 1) / 2));    // lift pads
-const levelWardens = (n) => Math.min(5, 1 + Math.floor(n / 2));        // wardens up top
+/* ------------------------------------------------------------- the ladder */
+// Nothing is thrown at the player before the level that introduces it, and every
+// new thing arrives on a level of its own, so there is room to work out what it
+// does before the next one lands:
+//
+//   1  red diamonds, and nothing else        (two rooms, learn the mines)
+//   2  + spitters                            (still two rooms)
+//   3  + shades
+//   4  + the level above: lift pads, raised decks, holes and tunnels, and a pad
+//      in the room you start in so it can be tried straight away
+//   5  + spawners: a room full of rifts, so it is obvious where monsters come from
+//   6  + wardens up there
+//   7+ everything at once, in bigger numbers - but the maps stop growing, so it
+//      gets denser rather than emptier
+const UNLOCK = { spitter: 2, shade: 3, upper: 4, rift: 5, warden: 6 };
+const allow = (thing, n) => n >= UNLOCK[thing];
+
+// The first two levels are little more than a room each: nowhere to hide, nothing
+// but the one new thing to work out. Then the size climbs to a ceiling and stays
+// there, so the late levels are won on the mechanics, not on map size.
+const levelSize = (n) => (n <= 2 ? 11 + n * 2 : n === 3 ? 21 : Math.min(35, 23 + (n - 4) * 2));
+const levelEnemies = (n) => Math.min(26, 3 + n * 2);  // roaming hunters
+const levelGuards = (n) => Math.min(10, n);           // defenders ringing the exit
+const levelLurkers = (n) => (allow("shade", n) ? Math.min(4, 1 + Math.floor((n - 3) / 2)) : 0);
+const levelRifts = (n) => (allow("rift", n) ? Math.min(7, 2 + Math.floor(n / 2)) : 0);
+const levelLifts = (n) => (allow("upper", n) ? Math.min(6, 2 + Math.floor((n - 4) / 2)) : 0);
+const levelWardens = (n) => (allow("warden", n) ? Math.min(6, 1 + Math.floor(((n - 6) * 2) / 3)) : 0);
 
 /* The warden: rooted on the raised runs, and only interested in things on its
    own level. It sits there half asleep while you are on the floor; the moment the
@@ -372,10 +392,38 @@ const crownGeo = new THREE.BoxGeometry(CELL * 0.94, 0.3, CELL * 0.94);
 const mastGeo = new THREE.CylinderGeometry(0.05, 0.07, 2.4, 6);
 const tipGeo = new THREE.SphereGeometry(0.15, 10, 8);
 const ventGeo = new THREE.PlaneGeometry(CELL * 0.6, CELL * 0.6);
+const pitGeo = new THREE.PlaneGeometry(CELL, CELL);
+const pitEdgeXGeo = new THREE.PlaneGeometry(CELL, 0.22);
+const pitEdgeZGeo = new THREE.PlaneGeometry(0.22, CELL);
+const roofGeo = new THREE.BoxGeometry(CELL, 1.5, CELL);
+const roofLampGeo = new THREE.PlaneGeometry(CELL * 0.86, CELL * 0.86);
+const ROOF_Y = 4.05;   // the slab spans 3.3 .. 4.8: over the hull on the floor,
+                       // straight through it one level up
 const markerGeo = new THREE.PlaneGeometry(CELL * 0.82, CELL * 0.82);
 const exitPillarGeo = new THREE.CylinderGeometry(CELL * 0.38, CELL * 0.38, 14, 22, 1, true);
 
 const wallTex = wallTexture();
+// A hole is simply no floor: a flat, pure black square, square to the grid, and
+// only the lip of the opening is drawn. Where two holes meet there is no lip at
+// all, so a void run reads as one opening rather than a grid of tiles.
+const pitMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+const pitEdgeMat = new THREE.MeshBasicMaterial({
+  color: 0xd8eeff, transparent: true, opacity: 0.8,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+});
+const roofMat = new THREE.MeshStandardMaterial({
+  color: 0x5d6a7e, map: wallTex, bumpMap: wallTex, bumpScale: 0.4,
+  roughness: 0.88, metalness: 0.05, emissive: 0x0b1622, emissiveIntensity: 1,
+});
+const roofLampMat = new THREE.MeshBasicMaterial({
+  color: 0x9fe8ff, transparent: true, opacity: 0.34, side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+});
+// a lit edge round the underside, so a tunnel reads as a ceiling and not as a
+// black wall dropped into the corridor
+const roofTrimMat = new THREE.MeshStandardMaterial({
+  color: CROWN_COOL, emissive: CROWN_COOL, emissiveIntensity: 1.3, roughness: 0.5,
+});
 const wallMat = new THREE.MeshStandardMaterial({
   color: 0xffffff, map: wallTex, bumpMap: wallTex, bumpScale: 0.4,
   roughness: 0.85, metalness: 0.05, emissive: 0x0a1420, emissiveIntensity: 1,
@@ -442,6 +490,7 @@ const exitPillarMat = new THREE.MeshBasicMaterial({
 const worldGroup = new THREE.Group();
 scene.add(worldGroup);
 let currentWallMesh = null;
+let currentRoofMesh = null;
 let level = null;
 
 function clearWorld() {
@@ -449,6 +498,8 @@ function clearWorld() {
     worldGroup.remove(child);
     if (child.isInstancedMesh) child.dispose();
   }
+  currentWallMesh = null;
+  currentRoofMesh = null;
 }
 
 function buildWorld(L) {
@@ -458,8 +509,10 @@ function buildWorld(L) {
   floor.scale.set(size * 3, size * 3, 1);
   floorTex.repeat.set((size * 3) / CELL, (size * 3) / CELL);
 
-  /* walls: per-instance height + colour */
-  const wallMesh = new THREE.InstancedMesh(boxGeo, wallMat, L.walls.size);
+  /* walls: per-instance height + colour. Cells with a hole in them are walls for
+     collision but have nothing standing in them, so they are built separately. */
+  const boxCells = [...L.walls].filter((key) => L.wallKind.get(key) !== "P");
+  const wallMesh = new THREE.InstancedMesh(boxGeo, wallMat, boxCells.length);
   wallMesh.castShadow = true;
   wallMesh.receiveShadow = true;
   const heights = new Map();
@@ -470,7 +523,7 @@ function buildWorld(L) {
     const s = new THREE.Vector3();
     const col = new THREE.Color();
     let i = 0;
-    for (const key of L.walls) {
+    for (const key of boxCells) {
       const [c, r] = key.split(",").map(Number);
       const kind = L.isBorderCell(c, r) ? "B" : L.wallKind.get(key) ?? "#";
       const style = WALL_STYLE[kind] ?? WALL_STYLE["#"];
@@ -491,16 +544,73 @@ function buildWorld(L) {
     }
     wallMesh.instanceMatrix.needsUpdate = true;
     if (wallMesh.instanceColor) wallMesh.instanceColor.needsUpdate = true;
+    // a hole is a wall cell with nothing in it: zero height, so one level up the
+    // hull passes over it and there is nothing underneath to stand on
+    for (const key of L.pits) heights.set(key, 0);
     wallTop = heights;
   }
   worldGroup.add(wallMesh);
   currentWallMesh = wallMesh;
+
+  /* the holes themselves: dark, torn at the rim, flat on the floor. At floor
+     level they read as somewhere not to drive; from the level above as somewhere
+     that has to be hovered across. */
+  for (const key of L.pits) {
+    const [c, r] = key.split(",").map(Number);
+    const x = L.cellToWorldX(c);
+    const z = L.cellToWorldZ(r);
+    const hole = new THREE.Mesh(pitGeo, pitMat);
+    hole.rotation.x = -Math.PI / 2;
+    hole.position.set(x, 0.02, z);
+    worldGroup.add(hole);
+    // only the lip, and only where the opening meets the floor
+    for (const [dc, dr, geo] of [
+      [0, -1, pitEdgeXGeo], [0, 1, pitEdgeXGeo], [-1, 0, pitEdgeZGeo], [1, 0, pitEdgeZGeo],
+    ]) {
+      if (L.pits.has(`${c + dc},${r + dr}`)) continue;
+      const lip = new THREE.Mesh(geo, pitEdgeMat);
+      lip.rotation.x = -Math.PI / 2;
+      lip.position.set(x + dc * CELL / 2, 0.05, z + dr * CELL / 2);
+      worldGroup.add(lip);
+    }
+  }
+
+  /* tunnels: a roof over a corridor. From the floor it is a low ceiling with a
+     strip of light under it; from the level above it is a wall, so the open sky
+     over the maze is not a free road. */
+  if (L.roofs && L.roofs.size) {
+    const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, L.roofs.size);
+    const m = new THREE.Matrix4();
+    let i = 0;
+    for (const key of L.roofs) {
+      const [c, r] = key.split(",").map(Number);
+      const x = L.cellToWorldX(c);
+      const z = L.cellToWorldZ(r);
+      m.setPosition(x, ROOF_Y, z);
+      roofMesh.setMatrixAt(i++, m);
+      // height for the collision: well above the hull, so the skip predicate never
+      // takes it away one level up
+      wallTop.set(key, ROOF_Y + 0.75);
+      const lamp = new THREE.Mesh(roofLampGeo, roofLampMat);
+      lamp.rotation.x = Math.PI / 2;
+      lamp.position.set(x, ROOF_Y - 0.77, z);
+      worldGroup.add(lamp);
+      const trim = new THREE.Mesh(crownGeo, roofTrimMat);
+      trim.position.set(x, ROOF_Y - 0.82, z);
+      worldGroup.add(trim);
+    }
+    roofMesh.instanceMatrix.needsUpdate = true;
+    roofMesh.castShadow = true;
+    worldGroup.add(roofMesh);
+    currentRoofMesh = roofMesh;
+  }
 
   /* glowing crown trim — one instanced mesh per colour, so a themed room is
      outlined in its own colour */
   {
     const groups = new Map(); // colour -> wall keys
     for (const key of L.walls) {
+      if (L.wallKind.get(key) === "P") continue; // a hole has no crown to trim
       const [c, r] = key.split(",").map(Number);
       const theme = L.wallTheme.get(key);
       const kind = L.wallKind.get(key);
@@ -680,8 +790,21 @@ function buildLiftPad(x, z) {
 function buildLiftPads(L) {
   pads = [];
   for (const cell of L.lifts) {
-    pads.push(buildLiftPad(L.cellToWorldX(cell.col), L.cellToWorldZ(cell.row)));
+    const pad = buildLiftPad(L.cellToWorldX(cell.col), L.cellToWorldZ(cell.row));
+    if (cell.vault) {
+      // the pocket is a single cell, so the pad is effectively its whole floor:
+      // it takes you up from anywhere inside, and the ring is widened to say so
+      pad.vault = true;
+      pad.r = LIFT.padR + 1.2;
+      pad.group.scale.set(1.25, 1, 1.25);
+    } else {
+      pad.r = LIFT.padR;
+    }
+    pads.push(pad);
   }
+  // ordinary pads first: they are the ones you can drive up to from anywhere,
+  // and the probes and poses use pads[0] as "a normal one"
+  pads.sort((a, b) => (a.vault ? 1 : 0) - (b.vault ? 1 : 0));
 }
 
 // Where the craft would come down: the floor, or the top of whatever wall is
@@ -846,8 +969,16 @@ glow.scale.setScalar(RADIUS * 3.5);
 scene.add(glow);
 
 /* ------------------------------------------------------------------ dust */
+// Motes drifting up through the level. Additive and dim, so they read as dust -
+// but 900 of them spread over the whole map means some of them always drift
+// straight through the hull, and up on the block level that reads as snow
+// falling through the craft. So the field keeps a clear pocket around it: any
+// mote that comes inside the bubble is pushed back out to the rim, and nothing
+// ever cuts through the saucer.
 const DUST = 900;
 const DUST_SPREAD = 260;
+const DUST_BUBBLE_R = 3.6;   // how wide the clear pocket round the craft is
+const DUST_BUBBLE_Y = 2.6;   // ...and how tall
 const dustPos = new Float32Array(DUST * 3);
 const dustRise = new Float32Array(DUST);
 for (let i = 0; i < DUST; i++) {
@@ -865,10 +996,26 @@ scene.add(new THREE.Points(dustGeo, new THREE.PointsMaterial({
 
 function updateDust(dt) {
   const a = dustGeo.attributes.position.array;
+  const cx = pos.x;
+  const cy = rig.position.y;
+  const cz = pos.z;
+  const r2 = DUST_BUBBLE_R * DUST_BUBBLE_R;
   for (let i = 0; i < DUST; i++) {
-    const y = i * 3 + 1;
+    const x = i * 3;
+    const y = x + 1;
+    const z = x + 2;
     a[y] += dustRise[i] * dt;
     if (a[y] > 10.5) a[y] = 0.2;
+    const dx = a[x] - cx;
+    const dz = a[z] - cz;
+    if (Math.abs(a[y] - cy) > DUST_BUBBLE_Y) continue;
+    const d2 = dx * dx + dz * dz;
+    if (d2 >= r2) continue;
+    const d = Math.sqrt(d2);
+    if (d < 1e-4) { a[x] = cx + DUST_BUBBLE_R; a[z] = cz; continue; }
+    const k = DUST_BUBBLE_R / d;
+    a[x] = cx + dx * k;
+    a[z] = cz + dz * k;
   }
   dustGeo.attributes.position.needsUpdate = true;
 }
@@ -1157,7 +1304,7 @@ function idleStep(e, dt) {
   const dz = tz - e.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.4) return;
-  const r = level.slide(e.x, e.z, (dx / d) * spd * dt, (dz / d) * spd * dt, ENEMY_R);
+  const r = level.walk(e.x, e.z, (dx / d) * spd * dt, (dz / d) * spd * dt, ENEMY_R);
   e.x = r.x;
   e.z = r.z;
 }
@@ -1496,8 +1643,10 @@ const hoverArcs = [0, 1].map((i) => {
 hoverFx.visible = false;
 
 function updateHoverFx(t) {
-  // the hover is the only time it is spending energy on staying up
-  const spending = (lift > 0.06 || liftUp) && !onBlockLevel();
+  // the hover is the only time it is spending energy on staying up: one level up
+  // with no block underneath, or on the floor over a hole
+  const spending = falling > 0 ||
+    (((lift > 0.06 || liftUp) && !onBlockLevel()) || overHole());
   hoverFx.visible = spending;
   if (!spending) return;
 
@@ -2002,7 +2151,7 @@ function stepShade(e, dt) {
 
   if (e.state === "stalk") {
     e.stalkT -= dt;
-    const r = level.slide(e.x, e.z, ux * LURK.stalkSpeed * dt, uz * LURK.stalkSpeed * dt, LURK.radius);
+    const r = level.walk(e.x, e.z, ux * LURK.stalkSpeed * dt, uz * LURK.stalkSpeed * dt, LURK.radius);
     e.x = r.x;
     e.z = r.z;
     e.group.position.set(e.x, 1.05 + Math.sin(e.t * 2.3) * 0.12, e.z);
@@ -2025,7 +2174,7 @@ function stepShade(e, dt) {
     e.chargeT += dt;
     const px = e.x;
     const pz = e.z;
-    const r = level.slide(e.x, e.z, e.cdx * LURK.chargeSpeed * dt, e.cdz * LURK.chargeSpeed * dt, LURK.radius);
+    const r = level.walk(e.x, e.z, e.cdx * LURK.chargeSpeed * dt, e.cdz * LURK.chargeSpeed * dt, LURK.radius);
     e.x = r.x;
     e.z = r.z;
     e.trailT -= dt;
@@ -2181,18 +2330,34 @@ function buildRiftMotes() {
   scene.add(riftMotes);
 }
 
-function makeRifts(count, rng) {
+function makeRifts(count, rng, { nearStart = false, grace = 0 } = {}) {
   clearRifts();
   if (count <= 0) return;
+  const span = Math.max(level.cols, level.rows) * CELL;
+  const minFromPlayer = nearStart ? 4 : Math.min(30, span * 0.28);
+  const spacing = nearStart ? 9 : Math.min(32, span * 0.32);
+  const startRoom = level.rooms[0];
+  const inStart = (c, r) =>
+    c >= startRoom.x && c <= startRoom.x + startRoom.w - 1 &&
+    r >= startRoom.y && r <= startRoom.y + startRoom.h - 1;
   const pool = level.openCells.filter(([c, r]) =>
-    Math.hypot(level.cellToWorldX(c) - pos.x, level.cellToWorldZ(r) - pos.z) > 30);
+    Math.hypot(level.cellToWorldX(c) - pos.x, level.cellToWorldZ(r) - pos.z) > minFromPlayer);
+  // on the introduction level the starting room is searched first, so the rifts
+  // are in front of you rather than somewhere across the map
+  if (nearStart) {
+    const front = pool.filter(([c, r]) => inStart(c, r));
+    const back = pool.filter(([c, r]) => !inStart(c, r));
+    pool.length = 0;
+    pool.push(...front, ...back);
+  }
   const spots = [];
-  for (let i = 0; i < count * 12 && spots.length < count && pool.length; i++) {
+  for (let i = 0; i < count * 16 && spots.length < count && pool.length; i++) {
     const [c, r] = pool.splice(Math.floor(rng() * pool.length), 1)[0];
     const x = level.cellToWorldX(c);
     const z = level.cellToWorldZ(r);
-    if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 32)) continue;
+    if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < spacing)) continue;
     spots.push({ x, z });
+    if (nearStart && spots.length >= count) break;
   }
   for (const [i, s] of spots.entries()) {
     const ring = new THREE.Mesh(riftRingGeo, riftRingMat.clone());
@@ -2211,7 +2376,7 @@ function makeRifts(count, rng) {
     riftGroup.add(ring, ring2, disc, glow);
     rifts.push({
       x: s.x, z: s.z, ring, ring2, disc, glow,
-      t: RIFT.grace(GAME.level) + i * 1.7 + rng() * 4,
+      t: (grace || RIFT.grace(GAME.level)) + i * 1.7 + rng() * 4,
       warnT: 0, spin: rng() * 6.28,
     });
   }
@@ -2227,7 +2392,8 @@ function openRift(rf) {
   rf.t = riftInterval();
   riftsOpened++;
   const power = GAME.level;
-  const type = decor() < (power < 3 ? 0.12 : 0.4) ? "spitter" : "grunt";
+  const canSpit = allow("spitter", GAME.level);
+  const type = canSpit && decor() < (power < 3 ? 0.12 : 0.4) ? "spitter" : "grunt";
   const e = spawnEnemy(type, rf.x, rf.z, power);
   e.fromRift = true;
   enemies.push(e);
@@ -2331,6 +2497,10 @@ addEventListener("keydown", (e) => {
     if (!e.repeat) toggleSound();
     return;
   }
+  if (names.has("KeyF") || names.has("f") || names.has("F")) {
+    if (!e.repeat) toggleFullscreen();
+    return;
+  }
   if (names.has("KeyR") || names.has("r") || names.has("R")) {
     if (!e.repeat) {
       if (state === "dead") restartGame();
@@ -2369,6 +2539,7 @@ const el = {
   lift: document.getElementById("lift"),
   liftLab: document.getElementById("liftlab"),
   liftBar: document.getElementById("liftbar"),
+  hint: document.getElementById("hint"),
 };
 
 const GAME = { level: 1, kills: 0 };
@@ -2396,6 +2567,7 @@ let shoveX = 0;        // a glob hit throwing the craft, in units/second
 let shoveZ = 0;
 let pads = [];
 let wallTop = new Map();
+let falling = 0;       // seconds into a fall out of the world (0 = not falling)
 
 // Is the craft high enough that the floor cannot touch it?
 const airborne = () => lift >= LIFT.safe;
@@ -2404,11 +2576,18 @@ const airborne = () => lift >= LIFT.safe;
 // level, and only things on the same level can reach each other.
 const craftLevel = () => (lift >= LIFT.fly ? 1 : 0);
 
+// Is there a hole in the floor under the craft? Then there is no ground at all:
+// the craft holds itself up on the meter exactly as it does one level higher, and
+// when the meter is gone it falls. Over ordinary floor there is always ground.
+const overHole = () => level.holeAt(pos.x, pos.z);
+
 // How high under the craft has to be clear for it to pass: everything lower than
 // the hull is flown over, everything taller still blocks. At floor level nothing
 // is clear, so the maze is exactly what it was.
 const belly = () => HOVER + lift * LIFT.alt - 0.85;
 function overWalls(c, r) {
+  // on the floor nothing is clear: holes included
+  if (lift < LIFT.fly) return false;
   const h = wallTop.get(`${c},${r}`);
   return h !== undefined && h < belly();
 }
@@ -2421,10 +2600,18 @@ function overLowWalls(c, r) {
   return h !== undefined && h < UPPER_CLEAR;
 }
 
+// What the hull runs into right now. On the floor that is rock; one level up it is
+// rock plus the roofs over the tunnels, because the level above does not get to
+// fly through a corridor that has a ceiling on it. (The low blocks are in `walls`
+// too, but the skip predicate takes them away one level up.)
+const craftSolids = () => (lift >= LIFT.fly ? level.upperSolids : level.walls);
+
 // Ground at the level the craft is at: a block top under it, not the floor far
-// below. This is what decides between "standing on the level" and "hovering".
+// below, and not the roof over a tunnel either. This is what decides between
+// "standing on the level" and "hovering".
 function onBlockLevel() {
-  return wallTopAt(pos.x, pos.z) >= BLOCK_H * 0.8;
+  const h = wallTopAt(pos.x, pos.z);
+  return h >= BLOCK_H * 0.8 && h <= BLOCK_H * 1.2;
 }
 
 const pos = new THREE.Vector3();
@@ -2456,6 +2643,23 @@ function hideOverlay() {
   el.overlay.classList.remove("show");
 }
 
+/* fullscreen: F, so the whole screen is the level. Nothing else changes - the
+   HUD and the hint are sized off the viewport anyway, and the resize handler that
+   is already there keeps the canvas in step. */
+function toggleFullscreen() {
+  const doc = document;
+  const root = doc && doc.documentElement;
+  if (!root) return;
+  if (doc.fullscreenElement) {
+    if (doc.exitFullscreen) doc.exitFullscreen();
+    return;
+  }
+  if (typeof root.requestFullscreen === "function") {
+    const p = root.requestFullscreen();
+    if (p && typeof p.catch === "function") p.catch(() => {});
+  }
+}
+
 /* sound: one key, and the setting sticks. The HUD says which way it is. */
 function updateSoundHud() {
   const off = gameAudio.muted;
@@ -2471,8 +2675,13 @@ function toggleSound() {
 function startLevel(n) {
   GAME.level = n;
   decor = makeRng(777 + n);
+  const size = levelSize(n);
   level = createLevel({
-    cols: levelSize(n), rows: levelSize(n), seed: 1000 + n, liftCount: levelLifts(n),
+    cols: size, rows: size, seed: 1000 + n,
+    liftCount: levelLifts(n), upper: allow("upper", n),
+    rooms: n <= 2 ? 2 : n === 3 ? 4 : 99,
+    startPad: n === UNLOCK.upper,
+    startDeck: n === UNLOCK.upper,
   });
   buildWorld(level);
   clearEntities();
@@ -2484,6 +2693,7 @@ function startLevel(n) {
   pos.set(level.cellToWorldX(level.start.col), HOVER, level.cellToWorldZ(level.start.row));
   lift = 0;
   liftUp = false;
+  falling = 0;
   shoveX = 0;
   shoveZ = 0;
   charge = LIFT.time;
@@ -2519,12 +2729,25 @@ function startLevel(n) {
 
   const rng = makeRng(5000 + n);
   const near = (c, r, cx, cz) => Math.hypot(level.cellToWorldX(c) - cx, level.cellToWorldZ(r) - cz);
+  // the first levels are small on purpose, so every "far enough away" radius has
+  // to shrink with the map or nothing would ever spawn
+  const span = Math.max(level.cols, level.rows) * CELL;
+  const awayR = Math.min(34, span * 0.34);
 
-  /* roamers, spread over the level and well away from the start pad */
-  const spawns = level.openCells.filter(([c, r]) => near(c, r, pos.x, pos.z) > 34);
+  /* roamers, spread over the level and well away from the start pad. Before the
+     spitters are introduced every hunter is a red diamond, so level 1 is mines
+     and nothing else. */
+  const canSpit = allow("spitter", n);
+  // a two-room level has nowhere that is 34 units from the start, so the ring
+  // closes in rather than leaving the level empty
+  let spawns = level.openCells.filter(([c, r]) => near(c, r, pos.x, pos.z) > awayR);
+  for (const r0 of [Math.min(awayR, 16), 10]) {
+    if (spawns.length >= levelEnemies(n)) break;
+    spawns = level.openCells.filter(([c, r]) => near(c, r, pos.x, pos.z) > r0);
+  }
   for (let i = 0; i < levelEnemies(n) && spawns.length; i++) {
     const [c, r] = spawns.splice(Math.floor(rng() * spawns.length), 1)[0];
-    const type = rng() < 0.33 ? "spitter" : "grunt";
+    const type = canSpit && rng() < 0.38 ? "spitter" : "grunt";
     enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r), n));
   }
 
@@ -2537,18 +2760,23 @@ function startLevel(n) {
   });
   for (let i = 0; i < levelGuards(n) && ringCells.length; i++) {
     const [c, r] = ringCells.splice(Math.floor(rng() * ringCells.length), 1)[0];
-    const type = rng() < 0.4 ? "spitter" : "grunt";
+    const type = canSpit && rng() < 0.4 ? "spitter" : "grunt";
     enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r), n, { guard: true, hpBonus: 1 }));
   }
 
-  /* shades: waiting in the rooms, well away from the start pad and the exit */
+  /* shades: waiting in the rooms, well away from the start pad and the exit.
+     Only from the level that introduces them on. */
   const roomCells = [];
+  const shadeAway = Math.min(38, span * 0.4);
+  const shadeExit = Math.min(20, span * 0.2);
   for (let i = 1; i < level.rooms.length; i++) {
     const room = level.rooms[i];
     for (let r = room.y; r < room.y + room.h; r++) {
       for (let c = room.x; c < room.x + room.w; c++) {
-        if (near(c, r, pos.x, pos.z) < 38) continue;
-        if (near(c, r, ex, ez) < 20) continue;
+        const key = `${c},${r}`;
+        if (level.walls.has(key) || level.pits.has(key)) continue; // not inside rock, a block or a hole
+        if (near(c, r, pos.x, pos.z) < shadeAway) continue;
+        if (near(c, r, ex, ez) < shadeExit) continue;
         roomCells.push([c, r]);
       }
     }
@@ -2563,7 +2791,7 @@ function startLevel(n) {
     const spots = [];
     for (const key of level.upper) {
       const [c, r] = key.split(",").map(Number);
-      if (near(c, r, pos.x, pos.z) < 22) continue;
+      if (near(c, r, pos.x, pos.z) < Math.min(22, span * 0.24)) continue;
       if (spots.some((w) => Math.hypot(w.x - level.cellToWorldX(c), w.z - level.cellToWorldZ(r)) < 18)) continue;
       spots.push({ x: level.cellToWorldX(c), z: level.cellToWorldZ(r) });
     }
@@ -2573,8 +2801,12 @@ function startLevel(n) {
     }
   }
 
-  /* rifts: standing spawn points that keep the pressure up */
-  makeRifts(levelRifts(n), rng);
+  /* rifts: standing spawn points that keep the pressure up. The level that
+     introduces them puts four of them round the starting room, so what a spawner
+     is and where the monsters come from is not something to work out. */
+  const introRifts = n === UNLOCK.rift;
+  makeRifts(introRifts ? Math.max(4, levelRifts(n)) : levelRifts(n), rng,
+    introRifts ? { nearStart: true, grace: 4 } : {});
 
   hideOverlay();
   updateHud();
@@ -2583,6 +2815,37 @@ function startLevel(n) {
   gameAudio.music({ level: n, state: "playing" });
   gameAudio.poke(0.45);            // a phrase on arrival, then it waits for you
   if (n > 1) gameAudio.sfx("levelUp");
+  // and one line about whatever has just been introduced, then the controls again
+  if (ARRIVALS[n]) showTip(ARRIVALS[n]);
+  else resetTip();
+}
+
+/* ----------------------------------------------------------- the arrival */
+// Each new mechanic gets a level of its own, and the line at the bottom of the
+// screen says what it is for the first few seconds of it, before going back to
+// the controls. After the last introduction the levels are just combinations.
+const CONTROLS_HINT = el.hint.innerHTML;
+const ARRIVALS = {
+  1: "RED DIAMONDS: they follow you, latch on and blow. Keep your distance.",
+  2: "NEW - SPITTERS: watch the chamber light up, then be somewhere else.",
+  3: "NEW - SHADES: they wake when you get close, and they do not miss. Get out of reach.",
+  4: "NEW - LIFT PADS: one level up. Up there the blocks are a road, and the holes cost hover.",
+  5: "NEW - SPAWNERS: those rings on the floor keep making monsters. They do not stop.",
+  6: "NEW - WARDENS: they hold the level above. Fight them from their own level, or stay low.",
+};
+let tipT = 0;
+function showTip(html, secs = 8) {
+  el.hint.innerHTML = html;
+  tipT = secs;
+}
+function resetTip() {
+  tipT = 0;
+  el.hint.innerHTML = CONTROLS_HINT;
+}
+function updateTip(dt) {
+  if (tipT <= 0) return;
+  tipT -= dt;
+  if (tipT <= 0) resetTip();
 }
 
 function restartGame() {
@@ -2590,24 +2853,48 @@ function restartGame() {
   startLevel(1);
 }
 
-function killPlayer() {
+function killPlayer({ blast = true } = {}) {
   if (state !== "playing") return;
   hp = 0;
   state = "dead";
   gameAudio.sfx("death");
   gameAudio.music({ state: "dead" });
-  blowUpPlayer();
-  // and it comes apart: hull plates, glowing coolant, embers
-  spawnDebris(pos.x, HOVER, pos.z, {
-    palette: "player", count: 24, speed: 18, lift: 13, spread: 1.2, life: 13,
-  });
-  shake = 1.7;
-  hurtFlash = 1;
+  if (blast) {
+    blowUpPlayer();
+    // and it comes apart: hull plates, glowing coolant, embers
+    spawnDebris(pos.x, HOVER, pos.z, {
+      palette: "player", count: 24, speed: 18, lift: 13, spread: 1.2, life: 13,
+    });
+    shake = 1.7;
+    hurtFlash = 1;
+  } else {
+    // went down a hole: there is nothing left to blow up, it is just gone
+    shake = 0.5;
+    ufo.visible = false;
+  }
   // let the wreck burn for a beat before the results card covers it
   later(1.5, () => {
     if (state !== "dead") return;
     showOverlay("GAME OVER", `Reached level ${GAME.level} · ${GAME.kills} kills · press R to restart`);
   });
+}
+
+// The meter ran out with a hole underneath: there is no ground to come down onto,
+// so the craft drops out of the world. It falls for a moment - long enough to see
+// it go - and then the run is over. This is the same rule as the level above: no
+// ground under the hull, no hover left, down you go. Only this time nothing catches
+// you at the bottom.
+const FALL_OUT = 1.15;
+function fallOutOfWorld() {
+  if (falling > 0 || state !== "playing") return;
+  falling = 0.0001;
+  charge = 0;
+  liftUp = false;
+  lift = 0;
+  liftWarned = 2;
+  gameAudio.sfx("voidFall", { x: pos.x, z: pos.z });
+  gameAudio.poke(0.9);
+  shake = Math.min(1.5, shake + 0.5);
 }
 
 // `pierce` ignores the invulnerability window: a blast always lands, so being
@@ -2741,7 +3028,7 @@ function stepMine(e, dt) {
   e.group.rotation.y = Math.atan2(-dx, -dz);
 
   if (d < e.aggro) {
-    const r = level.slide(e.x, e.z, ux * e.speed * dt, uz * e.speed * dt, ENEMY_R);
+    const r = level.walk(e.x, e.z, ux * e.speed * dt, uz * e.speed * dt, ENEMY_R);
     e.x = r.x;
     e.z = r.z;
   } else {
@@ -2751,7 +3038,7 @@ function stepMine(e, dt) {
 }
 
 function tryFire() {
-  if (state !== "playing") return;
+  if (state !== "playing" || falling) return;
   if (lift > 0.02 && lift < LIFT.fly) {
     // mid-ride the lift field holds the guns: say so on the HUD, do not eat the key
     el.lift.classList.add("deny");
@@ -2776,9 +3063,15 @@ function tryFire() {
 // out of reach: where a block is underneath it is supported and the meter fills,
 // where there is only open floor below it is hovering and the meter runs. Empty
 // meter, back down to the floor, where it fills again.
+//
+// A hole in the floor is the same situation one level down: there is no ground
+// under the craft, so it holds itself up on the same meter. Run it dry over a
+// hole and there is nothing to come down onto, and down it goes - out of the
+// world. That is the whole rule, one level up or on the floor: ground, or hover.
 function updateLift(dt) {
   let near = false;
   const charged = charge >= LIFT.minCharge;
+  const holeUnder = overHole();
   for (const p of pads) {
     p.t += dt;
     // a used pad re-arms once you have driven off it again
@@ -2797,10 +3090,10 @@ function updateLift(dt) {
   }
 
   // a charged pad under the craft takes it up exactly one level
-  if (state === "playing" && lift <= 0.001) {
+  if (state === "playing" && !falling && lift <= 0.001) {
     for (const p of pads) {
       if (p.used || !charged) continue;
-      if (Math.hypot(pos.x - p.x, pos.z - p.z) > LIFT.padR) continue;
+      if (Math.hypot(pos.x - p.x, pos.z - p.z) > (p.r ?? LIFT.padR)) continue;
       p.used = true;
       liftUp = true;
       liftWarned = 0;
@@ -2814,9 +3107,20 @@ function updateLift(dt) {
 
   const held = lift > 0.5 && onBlockLevel(); // a block top under the craft
 
-  if (liftUp) {
+  if (falling) {
+    // nothing left to hold it: the craft is already going down and out
+    charge = 0;
+  } else if (liftUp) {
     if (lift < 1) {
+      const wasBelow = lift < LIFT.fly;
       lift = Math.min(1, lift + dt / LIFT.rise);
+      // the moment the hull is high enough for the level above, whatever is up
+      // there (a roof over a tunnel) pushes it aside instead of swallowing it
+      if (wasBelow && lift >= LIFT.fly) {
+        const r = level.resolve(pos.x, pos.z, RADIUS, overWalls, level.upperSolids);
+        pos.x = r.x;
+        pos.z = r.z;
+      }
     } else if (held) {
       // standing on the level: no cost, and it fills back up
       charge = Math.min(LIFT.time, charge + dt * LIFT.regen);
@@ -2842,7 +3146,7 @@ function updateLift(dt) {
     lift = Math.max(0, lift - dt / LIFT.fall);
     // coming down: whatever is still too tall for the hull pushes it aside
     if (lift < LIFT.fly) {
-      const r = level.resolve(pos.x, pos.z, RADIUS, overWalls);
+      const r = level.resolve(pos.x, pos.z, RADIUS, overWalls, craftSolids());
       pos.x = r.x;
       pos.z = r.z;
     }
@@ -2851,18 +3155,36 @@ function updateLift(dt) {
       shake = Math.min(1.2, shake + 0.32);
       gameAudio.sfx("liftLand", { x: pos.x, z: pos.z });
     }
+  } else if (state === "playing" && holeUnder) {
+    // on the floor over a hole: no ground, so the same meter holds it up
+    charge -= dt * LIFT.drain;
+    if (liftWarned === 0 && charge <= LIFT.warn) {
+      liftWarned = 1;
+      gameAudio.sfx("liftWarn");
+    } else if (liftWarned === 1 && charge <= LIFT.warn * 0.4) {
+      liftWarned = 2;
+      gameAudio.sfx("liftWarn", { pitch: 1 });
+    }
+    if (charge <= 0) fallOutOfWorld();
   }
 
-  // on the floor the meter fills up again
-  if (!liftUp && lift <= 0.001) charge = Math.min(LIFT.time, charge + dt * LIFT.regen);
+  // on solid floor the meter fills up again
+  if (!falling && !liftUp && lift <= 0.001 && !holeUnder) {
+    charge = Math.min(LIFT.time, charge + dt * LIFT.regen);
+  }
 
   if (liftDenyT > 0) {
     liftDenyT -= dt;
     if (liftDenyT <= 0) el.lift.classList.remove("deny");
   }
 
-  // the HUD row: a sign by a charged pad, the meter while you are up
-  const key = lift > 0.001 || liftUp ? (held ? "block" : "hover") : near ? (charged ? "near" : "charging") : "off";
+  // the HUD row: a sign by a charged pad, the meter while you are up (or over a
+  // hole, where the same meter is the thing keeping you up)
+  const hovering = lift > 0.001 || liftUp;
+  const key = hovering
+    ? (held ? "block" : "hover")
+    : holeUnder && state === "playing" ? "hover"
+    : near ? (charged ? "near" : "charging") : "off";
   if (key !== liftHudState) {
     liftHudState = key;
     for (const c of ["on", "near", "block", "charging", "warn"]) el.lift.classList.remove(c);
@@ -2910,8 +3232,17 @@ function updateUfo(dt, thrust, turn) {
   const alt = lift * LIFT.alt;
   const bob = Math.sin(bobT * 3) * (0.07 + lift * 0.11);
   const rigY = HOVER + alt + bob;
-  rig.position.set(pos.x, rigY, pos.z);
-  rig.rotation.y = -yaw;
+  // a fall out of the world: the craft drops away, tumbling, until the run ends
+  let drop = 0;
+  let spin = 0;
+  if (falling > 0) {
+    falling += dt;
+    drop = Math.min(40, 9 * falling * falling + 2.2 * falling);
+    spin = falling * 5.5;
+    if (falling >= FALL_OUT) killPlayer({ blast: false });
+  }
+  rig.position.set(pos.x, rigY - drop, pos.z);
+  rig.rotation.y = -yaw + spin;
   ufo.rotation.set(-thrust * 0.05 * (1 - lift * 0.5), 0, bank * (1 + lift * 0.35));
 
   const beamH = Math.max(0.1, rigY - 0.5 - 0.06);
@@ -2938,6 +3269,12 @@ function updateUfo(dt, thrust, turn) {
 function step(dt) {
   fireT -= dt;
   hurtT -= dt;
+  // once it is going down there is nothing left to steer
+  if (falling) {
+    updateUfo(dt, 0, 0);
+    elapsed += dt;
+    return;
+  }
   if (mouseDown || held("Space", " ")) tryFire();
 
   let turn = 0;
@@ -2954,14 +3291,15 @@ function step(dt) {
     const sp = SPEED * (lift >= LIFT.fly ? LIFT.speed : 1);
     // one level up the low blocks are underneath: everything taller still stops
     // the craft, so the maze is only opened up by exactly the height it gained
-    const r = level.slide(pos.x, pos.z, fx * thrust * sp * dt, fz * thrust * sp * dt, RADIUS, overWalls);
+    const r = level.slide(pos.x, pos.z, fx * thrust * sp * dt, fz * thrust * sp * dt,
+      RADIUS, overWalls, craftSolids());
     pos.x = r.x;
     pos.z = r.z;
   }
 
   // and a knockback, which bleeds away on its own
   if (Math.abs(shoveX) + Math.abs(shoveZ) > 0.02) {
-    const r = level.slide(pos.x, pos.z, shoveX * dt, shoveZ * dt, RADIUS, overWalls);
+    const r = level.slide(pos.x, pos.z, shoveX * dt, shoveZ * dt, RADIUS, overWalls, craftSolids());
     pos.x = r.x;
     pos.z = r.z;
     const k = Math.exp(-WARDEN.knockDecay * dt);
@@ -3004,7 +3342,7 @@ function updateEnemies(dt) {
       const want = 16;
       const move = d > want + 3 ? 1 : d < want - 3 ? -1 : 0;
       if (move) {
-        const r = level.slide(e.x, e.z, ux * move * e.speed * dt, uz * move * e.speed * dt, ENEMY_R);
+        const r = level.walk(e.x, e.z, ux * move * e.speed * dt, uz * move * e.speed * dt, ENEMY_R);
         e.x = r.x;
         e.z = r.z;
       }
@@ -3048,7 +3386,10 @@ function updateBullets(dt) {
     let kill = b.life <= 0;
     let hitRock = false;
     const skip = b.level === 1 ? overLowWalls : null;
-    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip)) { kill = true; hitRock = true; }
+    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip, b.level === 1 ? level.upperSolids : level.walls)) {
+      kill = true;
+      hitRock = true;
+    }
     if (!kill) {
       for (const e of enemies) {
         if (e.dead) continue;
@@ -3085,7 +3426,10 @@ function updateBullets(dt) {
     let kill = b.life <= 0;
     let hitRock = false;
     const skip = b.level === 1 ? overLowWalls : null;
-    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip)) { kill = true; hitRock = true; }
+    if (!kill && level.hitsWall(b.x, b.z, BULLET_R, skip, b.level === 1 ? level.upperSolids : level.walls)) {
+      kill = true;
+      hitRock = true;
+    }
     if (!kill && b.level === craftLevel() && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
       if (b.kind === "glob") {
         // a glob does not only bite: it drinks the hover and throws the craft
@@ -3164,11 +3508,19 @@ function updateHunt(dt) {
 /* ------------------------------------------------------- third-person cam */
 const camPos = new THREE.Vector3();
 const camRay = new THREE.Raycaster();
+// test-only: a still or a probe can put the camera exactly where it wants, so a
+// feature can be photographed from above instead of guessed at from the chase cam
+let camOverride = null;
 const camAnchor = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 const camDir = new THREE.Vector3();
 
 function updateCamera(dt) {
+  if (camOverride) {
+    camera.position.set(camOverride.x, camOverride.y, camOverride.z);
+    camera.lookAt(camOverride.tx, camOverride.ty, camOverride.tz);
+    return;
+  }
   const fx = Math.sin(yaw);
   const fz = -Math.cos(yaw);
 
@@ -3177,13 +3529,23 @@ function updateCamera(dt) {
   camPos.z += (pos.z - fz * CAM_DIST - camPos.z) * k;
 
   camAnchor.set(pos.x, HOVER + lift * LIFT.alt + 0.8, pos.z);
-  camDesired.set(camPos.x, CAM_HEIGHT + lift * LIFT.alt * 0.6, camPos.z);
+  // under a tunnel roof the chase camera would sit above the ceiling and stare at
+  // the outside of it: duck under the roof instead, inside the corridor
+  const underRoof = wallTopAt(pos.x, pos.z) > 4;
+  const camY = underRoof ? Math.min(CAM_HEIGHT, ROOF_Y - 1.0) : CAM_HEIGHT;
+  camDesired.set(camPos.x, camY + lift * LIFT.alt * 0.6, camPos.z);
   camDir.copy(camDesired).sub(camAnchor);
   const dist = camDir.length();
   camDir.divideScalar(dist || 1);
   camRay.set(camAnchor, camDir);
   camRay.far = dist;
-  const hit = currentWallMesh ? camRay.intersectObject(currentWallMesh, false)[0] : null;
+  // anything solid between the craft and the camera pulls the camera in: walls,
+  // and the roof slabs over the tunnels
+  const hits = [];
+  if (currentWallMesh) hits.push(...camRay.intersectObject(currentWallMesh, false));
+  if (currentRoofMesh) hits.push(...camRay.intersectObject(currentRoofMesh, false));
+  hits.sort((a, b) => a.distance - b.distance);
+  const hit = hits[0];
   if (hit) camDesired.copy(camAnchor).addScaledVector(camDir, Math.max(3, hit.distance - 0.6));
 
   camera.position.copy(camDesired);
@@ -3229,7 +3591,7 @@ globalThis.UFO = {
   get pos() { return pos; },
   get yaw() { return yaw; },
   set yaw(v) { yaw = v; },
-  get stuck() { return level.hitsWall(pos.x, pos.z); },
+  get stuck() { return level.hitsWall(pos.x, pos.z, RADIUS, overWalls, craftSolids()); },
   stuckAt: (x, z) => level.hitsWall(x, z),
   get keys() { return [...keys]; },
   get shades() { return enemies.filter((e) => e.type === "lurker"); },
@@ -3249,14 +3611,35 @@ globalThis.UFO = {
   get pads() { return pads; },
   get liftCfg() { return LIFT; },
   get onBlock() { return onBlockLevel(); },
+  // holes in the floor: no ground at all, and the same meter holds you up
+  get pits() { return [...level.pits].map((key) => {
+    const [c, r] = key.split(",").map(Number);
+    return { col: c, row: r, x: level.cellToWorldX(c), z: level.cellToWorldZ(r) };
+  }); },
+  get vaults() { return level.vaults; },
+  get roofs() { return [...level.roofs].map((key) => {
+    const [c, r] = key.split(",").map(Number);
+    return { col: c, row: r, x: level.cellToWorldX(c), z: level.cellToWorldZ(r) };
+  }); },
+  get overHole() { return overHole(); },
+  holeAt: (x, z) => level.holeAt(x, z),
+  get falling() { return falling; },
+  get craftVisible() { return ufo.visible; },
+  // the dust field, and the bubble kept clear around the craft
+  get dust() { return dustGeo.attributes.position.array; },
+  get dustBubble() { return { r: DUST_BUBBLE_R, y: DUST_BUBBLE_Y }; },
+  get tip() { return { text: el.hint.innerHTML, t: tipT }; },
+  get controlsHint() { return CONTROLS_HINT; },
   // wall cells by kind, in world units (the tests and the probe steer by these)
   get blocks() { return cellsOfKind((k) => k === "O"); },
-  get highWalls() { return cellsOfKind((k) => k !== "O"); },
-  blockedAt: (x, z) => level.hitsWall(x, z, RADIUS, overWalls),
+  get highWalls() { return cellsOfKind((k) => k !== "O" && k !== "P"); },
+  blockedAt: (x, z) => level.hitsWall(x, z, RADIUS, overWalls,
+    lift >= LIFT.fly ? level.upperSolids : level.walls),
   wallTopAt: (x, z) => wallTopAt(x, z),
   blastAt: (d) => blastDamage(d),
   get audio() { return gameAudio; },
   killPlayer,
+  despawn(e) { killEnemy(e, { credit: false, quiet: true }); },
   get exit() { return level.exit; },
   get rooms() { return level.rooms; },
   get props() {
@@ -3267,6 +3650,11 @@ globalThis.UFO = {
   },
   get stats() { return level.stats; },
   worldOf: (c, r) => level.worldOf(c, r),
+  // ...and a camera that ignores the chase for one still
+  cam(x, y, z, tx, ty, tz) { camOverride = { x, y, z, tx, ty, tz }; },
+  camOff() { camOverride = null; },
+  start(n) { startLevel(Math.max(1, Math.floor(n))); },
+  get ladder() { return { unlock: UNLOCK, enemies: levelEnemies(GAME.level), guards: levelGuards(GAME.level), shades: levelLurkers(GAME.level), rifts: levelRifts(GAME.level), lifts: levelLifts(GAME.level), wardens: levelWardens(GAME.level) }; },
   aim(x, z) { yaw = Math.atan2(x - pos.x, -(z - pos.z)); },
   move(x, z) { pos.x = x; pos.z = z; },
   damage(n) { hurtPlayer(n); },
@@ -3309,5 +3697,6 @@ renderer.setAnimationLoop(() => {
   updateHunt(dt);
   updateHud();
   updateDamageUi(dt);
+  updateTip(dt);
   renderer.render(scene, camera);
 });
