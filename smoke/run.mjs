@@ -236,17 +236,33 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(!UFO.hunted, "and the hunt is off again");
 }
 
-/* enemies actually chase and can hurt the player */
+/* a red diamond does not claw at the hull, it detonates against it */
 {
+  down("KeyR");
+  up("KeyR");           // fresh level, so the numbers below are the whole story
+  frame(2);
   const hp0 = UFO.hp;
-  const target = UFO.enemies.find((e) => !e.dead && e.type === "grunt") || UFO.enemies[0];
+  const k0 = UFO.kills;
+  const target = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+  ok(!!target, "there is a red diamond to run into");
   if (target) {
-    UFO.move(target.x + 1.2, target.z);
-    frame(90);
-    ok(UFO.hp < hp0 || UFO.state === "dead", `contact with a monster costs health (${hp0} -> ${UFO.hp})`);
-  } else {
-    ok(true, "no monster left to test contact damage");
+    UFO.move(target.x + 1.0, target.z);
+    let rammed = false;
+    for (let i = 0; i < 25 && !rammed; i++) {
+      frame(1);
+      if (target.dead) rammed = true;
+    }
+    ok(rammed, "the diamond detonates the moment it touches the hull");
+    const lost = hp0 - UFO.hp;
+    ok(lost >= 20, `and the ram bites: a fifth of the bar (${hp0} -> ${UFO.hp}, -${lost})`);
+    ok(UFO.hp > 0, `one ram is not a one-shot kill (${UFO.hp} left)`);
+    ok(UFO.kills === k0, "a suicide ram is not a kill of yours");
+    ok(UFO.particles > 0, `it goes off in its own fireball (${UFO.particles} particles)`);
+    ok(UFO.explosions + UFO.gore.length > 0, "and it leaves a mess");
   }
+  down("KeyR");
+  up("KeyR");
+  frame(2);
 }
 
 /* reaching the exit clears the level and advances it */

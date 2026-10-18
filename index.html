@@ -17,22 +17,24 @@
       }
 
       #hud {
-        left: 16px; top: 14px;
+        /* the whole panel scales off the shorter screen edge, so a big monitor
+           does not shrink it away into the corner */
+        left: max(16px, 1.7vmin); top: max(14px, 1.5vmin);
         color: #cbd5e1;
         text-shadow: 0 1px 3px #000;
-        font-size: 14px;
+        font-size: clamp(15px, 1.15vmin + 8px, 32px);
         line-height: 1.7;
-        min-width: 190px;
+        min-width: clamp(190px, 18vmin, 460px);
       }
-      #hud .top { display: flex; justify-content: space-between; gap: 14px; }
+      #hud .top { display: flex; justify-content: space-between; gap: 0.9em; }
       #lvl { color: #7dd3fc; font-weight: 700; letter-spacing: 0.06em; }
       #kills { color: #facc15; }
       #hpwrap {
-        margin-top: 7px;
-        height: 9px;
+        margin-top: 0.55em;
+        height: 0.85em;
         background: rgba(148, 163, 184, 0.22);
         border: 1px solid rgba(148, 163, 184, 0.35);
-        border-radius: 5px;
+        border-radius: 0.6em;
         overflow: hidden;
       }
       #hpbar {
@@ -44,7 +46,7 @@
       #left { color: #fca5a5; }
       #hunt {
         display: none;
-        margin-top: 3px;
+        margin-top: 0.2em;
         color: #ff5d8f;
         font-weight: 700;
         letter-spacing: 0.14em;
@@ -67,10 +69,10 @@
       }
 
       #hint {
-        left: 50%; bottom: 14px;
+        left: 50%; bottom: max(14px, 1.4vmin);
         transform: translateX(-50%);
         color: #8296ad;
-        font-size: 13px;
+        font-size: clamp(12px, 0.85vmin + 5px, 20px);
         text-shadow: 0 1px 3px #000;
         white-space: nowrap;
       }

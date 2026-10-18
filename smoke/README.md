@@ -55,7 +55,9 @@ node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going u
 Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 (a shade awake and hunting), `rift`. Extras: `&boom=enemy|player` (detonate and
 freeze mid-blast), `&range=N` (how far away the kill happens), `&keys=1` (report
-the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a shade).
+the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a shade),
+`&ram=1` (run a red diamond into the hull and report what it cost), `&settle=N`
+(let the level run by itself for N frames before the probe reads it).
 
 ## 5. Trusted key events — `smoke/cdp.mjs`
 

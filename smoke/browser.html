@@ -206,6 +206,20 @@
         }
       }
 
+      // ?ram=1 — run into a red diamond and report what it costs
+      const ram = {};
+      if (new URLSearchParams(location.search).has("ram")) {
+        const t = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+        if (t) {
+          ram.hpBefore = UFO.hp;
+          UFO.move(t.x + 1, t.z);
+          await frames(12);
+          ram.hpAfter = UFO.hp;
+          ram.diamondGone = t.dead;
+          ram.kills = UFO.kills;
+        }
+      }
+
       // ?settle=N — let the level run on by itself before the probe reads it
       const settle = Number(new URLSearchParams(location.search).get("settle") || 0);
       if (settle > 0) await frames(settle);
@@ -234,6 +248,7 @@
           riftsOpened: UFO.riftsOpened,
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
+          ram,
         });
         document.body.appendChild(pre);
       }

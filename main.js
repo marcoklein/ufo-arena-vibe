@@ -23,7 +23,8 @@ const BULLET_R = 0.35;
 const NOSE = 1.5;        // muzzle offset from the craft centre
 
 const ENEMY_R = 1.05;
-const TOUCH_DMG = 12;
+const TOUCH_DMG = 12;      // a spitter brushing past you
+const RAM_DMG = PLAYER_HP * 0.2; // a red diamond going off on the hull: a fifth of the bar
 
 /* the shade: a corner-crawler that ends the run the moment it touches you */
 const LURK = {
@@ -1902,8 +1903,10 @@ function killPlayer() {
   });
 }
 
-function hurtPlayer(dmg) {
-  if (state !== "playing" || hurtT > 0) return;
+// `pierce` ignores the invulnerability window: a kamikaze hit always lands, so
+// ramming is never a free kill for the player.
+function hurtPlayer(dmg, { pierce = false } = {}) {
+  if (state !== "playing" || (hurtT > 0 && !pierce)) return;
   hp -= dmg;
   hurtT = HURT_COOLDOWN;
   hurtFlash = Math.min(1, hurtFlash + 0.5 + dmg * 0.02);
@@ -1911,11 +1914,11 @@ function hurtPlayer(dmg) {
   if (hp <= 0) killPlayer();
 }
 
-function killEnemy(e) {
+function killEnemy(e, { credit = true } = {}) {
   if (e.dead) return;
   e.dead = true;
   enemyGroup.remove(e.group);
-  GAME.kills++;
+  if (credit) GAME.kills++;
   if (e.type === "lurker") {
     spawnBurst(e.x, 1.2, e.z, BOOM.shade());
     spawnGore(e.x, 1.2, e.z, {
@@ -1932,6 +1935,16 @@ function killEnemy(e) {
   }
   const d = Math.hypot(pos.x - e.x, pos.z - e.z);
   if (d < 14) shake = Math.min(1.2, shake + 0.22 * (1 - d / 14));
+}
+
+// A red diamond does not claw at the hull, it detonates against it: it dies in
+// its own fireball and takes a fifth of your health with it. Not a one-shot,
+// but three of them in the open is a very short run.
+function ramPlayer(e) {
+  if (state !== "playing") return;
+  killEnemy(e, { credit: false });
+  shake = Math.min(1.5, shake + 0.45);
+  hurtPlayer(RAM_DMG, { pierce: true });
 }
 
 function tryFire() {
@@ -2026,7 +2039,10 @@ function updateEnemies(dt) {
       } else {
         idleStep(e, dt);
       }
-      if (d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG);
+      if (d < (e.r || ENEMY_R) + RADIUS + 0.2) {
+        ramPlayer(e);
+        continue;
+      }
     } else {
       if (engaged) {
         const want = 16;
