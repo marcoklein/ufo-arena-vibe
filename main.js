@@ -76,16 +76,16 @@ const BLOCK_H = 2.6;
    back down. */
 const LIFT = {
   alt: BLOCK_H,     // one level: exactly the height of a low block
-  time: 7,          // seconds of hover in a full meter
+  time: 4.2,        // seconds of hover in a full meter
   drain: 1,         // meter per second while there is no ground underneath
-  regen: 0.8,       // and how fast it fills on the ground
-  minCharge: 1.5,   // no pad will lift you on less than this
-  rise: 0.55,       // climb time
-  fall: 0.7,        // and back down
+  regen: 1.2,       // and how fast it fills on the ground
+  minCharge: 0.9,   // no pad will lift you on less than this
+  rise: 0.45,       // climb time
+  fall: 0.4,        // and back down: the round trip is short on purpose
   speed: 1.25,      // speed while up on the block level
   padR: 2.1,        // drive this close to a charged pad and it takes you up
   armR: 4.5,        // drive this far off a used pad and it re-arms
-  warn: 1.8,        // the last stretch: the HUD and the drop marker go red
+  warn: 1.2,        // the last stretch: the HUD and the drop marker go red
   safe: 0.45,       // above this the floor cannot reach you
   fly: 0.85,        // above this the blocks are underneath, not in the way
 };
@@ -456,9 +456,12 @@ function buildWorld(L) {
       s.set(1, h, 1);
       m.compose(p, q, s);
       wallMesh.setMatrixAt(i, m);
-      // walls lining a themed room take that room's colour
+      // walls lining a themed room take that room's colour. The raised runs are
+      // the level above the floor, so they keep one look all over the maze.
       const theme = L.wallTheme.get(key);
-      col.setHex(theme === undefined ? style.color : THEMES[theme].wall).multiplyScalar(0.85 + decor() * 0.35);
+      const raised = L.upper && L.upper.has(key);
+      col.setHex(raised ? WALL_STYLE.O.color : theme === undefined ? style.color : THEMES[theme].wall)
+        .multiplyScalar(0.85 + decor() * 0.35);
       wallMesh.setColorAt(i, col);
       i++;
     }
@@ -478,6 +481,7 @@ function buildWorld(L) {
       const theme = L.wallTheme.get(key);
       const kind = L.wallKind.get(key);
       const color = L.isBorderCell(c, r) ? CROWN_COOL
+        : L.upper && L.upper.has(key) ? CROWN_WARM
         : theme !== undefined ? THEMES[theme].trim
         : kind === "O" ? CROWN_WARM
         : CROWN_COOL;

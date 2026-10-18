@@ -114,6 +114,19 @@
           UFO.move(b.x, b.z);
           await frames(24);
         }
+      } else if (pose === "run") {
+        // the raised run seen from the floor: the level above, from below
+        const p = UFO.pads[0];
+        const b = UFO.blocks.reduce((best, w) => {
+          const d = Math.hypot(w.x - p.x, w.z - p.z);
+          return !best || d < best.d ? { ...w, d } : best;
+        }, null);
+        if (b) {
+          const v = vantage(b.x, b.z, 10) || { x: b.x + 8, z: b.z };
+          UFO.move(v.x, v.z);
+          UFO.aim(b.x, b.z);
+          await frames(24);
+        }
       } else if (pose === "mine") {
         // an armed-adjacent look at one mine from outside its arming range
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");

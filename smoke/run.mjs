@@ -472,6 +472,9 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(pads.every((p) => !UFO.stuckAt(p.x, p.z)), "and they stand on open floor");
   ok(pads.every((p) => !p.used), "a fresh pad is charged");
   ok(UFO.charge > cfg.time * 0.95, `the hover meter starts full (${UFO.charge.toFixed(1)}s)`);
+  ok(cfg.time <= 5 && cfg.fall <= 0.6, `the lift is a hop, not a flight (${cfg.time}s up, ${cfg.fall}s down)`);
+  ok(pads.some((p) => UFO.blocks.some((b) => Math.hypot(b.x - p.x, b.z - p.z) < 18)),
+    "and a pad stands beside the level above, so there is something to fly onto");
 
   // a charged pad within reach says so, so it can be found
   UFO.move(pads[0].x + 5, pads[0].z);
@@ -535,11 +538,14 @@ ok(!UFO.stuck, "player starts outside the walls");
   // drain it dry: back to the floor, with a warning on the way
   UFO.move(pad.x, pad.z); // open floor: nothing at block level underneath
   let warned = false;
+  let framesDown = 0;
   for (let i = 0; i < 1400 && UFO.lift > 0; i++) {
     frame(1);
+    framesDown++;
     if (audio.log.includes("liftWarn")) warned = true;
   }
   ok(UFO.lift === 0, "the meter runs out and the craft comes down");
+  ok(framesDown / 60 < 5.5, `from up to down in ${(framesDown / 60).toFixed(1)}s, so the hop is short`);
   ok(warned, "with a warning before it drops");
   ok(audio.log.includes("liftFall") && audio.log.includes("liftLand"), "and a fall and a touchdown to go with it");
   ok(!UFO.stuck, "landing off the wall tops rather than inside them");

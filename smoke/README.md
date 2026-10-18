@@ -19,9 +19,13 @@ random walk never leaves the craft buried in a wall.
 node test.mjs
 ```
 
-It also checks the lift pads: two and up per level, each on open floor with room
-around it, in its own cell, not on the start or the exit, reachable on foot, and
-one of them a short run from the exit.
+It also checks the two levels: the raised runs (a run of low blocks is what the
+craft drives on up there, and the gaps between them are what it hovers over) are
+inside rooms with a cell to spare at every edge, never on a doorway approach,
+never on the start or exit cell, and at least one lift pad stands beside one. The
+pads themselves are two and up per level, each on open floor with room around it,
+in its own cell, not on the start or the exit, reachable on foot, and one of them
+a short run from the exit.
 
 ## 2. Gameplay in Node — `smoke/run.mjs`
 
@@ -63,6 +67,7 @@ node smoke/shot.mjs smoke/out/fuse.png  "&pose=fuse"     # caught in one when it
 node smoke/shot.mjs smoke/out/blast.png "&pose=blast"    # ...and the moment it goes off
 node smoke/shot.mjs smoke/out/pad.png    "&pose=pad"       # a lift pad and its level marker
 node smoke/shot.mjs smoke/out/block.png  "&pose=block"     # up one level, over a block top
+node smoke/shot.mjs smoke/out/run.png    "&pose=run"       # a raised run seen from the floor
 node smoke/shot.mjs smoke/out/volley.png "&boom=volley"      # your bolts in the air
 node smoke/shot.mjs smoke/out/seeds.png  "&boom=seeds"       # a spitter with a seed out
 node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"   # freeze mid-fireball
@@ -72,7 +77,8 @@ node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going u
 Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 (a shade awake and hunting), `rift`, `mine`, `fuse` (mid-fuse, kill ring out),
 `blast` (the instant after a mine goes off), `pad` (a lift pad from the floor),
-`block` (the craft up one level, standing over a low block). Extras: `&boom=enemy|player`
+`block` (the craft up one level, standing over a low block), `run` (a raised run
+from the floor, so both levels are in one frame). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
@@ -133,7 +139,9 @@ keyboard's rollover rather than the game.
 
 Draws the generated layout flat so the shape of a level can be judged at a
 glance: rooms outlined in their theme colour, corridors in grey, dead ends
-visible, start green, exit gold. Needs the dev server.
+visible, start green, exit gold. Both levels are in it: the raised runs (the
+block tops that make up the level above the floor) in gold, and the lift pads as
+cyan rings. Needs the dev server.
 
 ```
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \

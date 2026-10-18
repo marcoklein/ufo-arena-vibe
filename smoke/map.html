@@ -16,6 +16,9 @@
 
         node smoke/shot.mjs smoke/out/map.png "&pose=..."   (no)
 
+        Two levels: raised runs in warm brown (the block tops you drive on),
+        lift pads as cyan rings, the floor as grey.
+
         /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
           --headless=new --no-sandbox --window-size=900,900 \
           --screenshot=smoke/out/map.png \
@@ -28,7 +31,10 @@
       const q = new URLSearchParams(location.search);
       const lvl = Number(q.get("level") || 1);
       const size = Math.min(45, 23 + lvl * 2);
-      const L = createLevel({ cols: size, rows: size, seed: 1000 + lvl });
+      const L = createLevel({
+        cols: size, rows: size, seed: 1000 + lvl,
+        liftCount: Math.min(6, 2 + Math.floor((lvl - 1) / 2)),
+      });
 
       const scale = Math.max(6, Math.floor(880 / size));
       const cv = document.createElement("canvas");
@@ -57,11 +63,13 @@
         ctx.globalAlpha = 1;
       }
 
-      // walls, tinted the way the 3D build tints them
+      // walls, tinted the way the 3D build tints them. The raised runs are the
+      // level above the floor, so they get the one look the game gives them.
       for (const key of L.walls) {
         const [c, r] = key.split(",").map(Number);
         const theme = L.wallTheme.get(key);
         if (L.isBorderCell(c, r)) ctx.fillStyle = "#2b3547";
+        else if (L.upper.has(key)) ctx.fillStyle = "#f0b64a";
         else if (theme !== undefined) {
           ctx.fillStyle = hex(THEMES[theme].wall);
         } else {
@@ -69,6 +77,15 @@
           ctx.fillStyle = kind === "X" ? "#1d4a4e" : kind === "O" ? "#4a3226" : "#333f52";
         }
         ctx.fillRect(px(c), px(r), scale, scale);
+      }
+
+      // lift pads: the way up onto those runs
+      for (const l of L.lifts) {
+        ctx.strokeStyle = "#5ef0ff";
+        ctx.lineWidth = Math.max(1.5, scale * 0.22);
+        ctx.beginPath();
+        ctx.arc(px(l.col) + scale / 2, px(l.row) + scale / 2, scale * 0.62, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       // themed props
@@ -89,7 +106,7 @@
       dot(L.start.col, L.start.row, "#2ee6a6");
       dot(L.exit.col, L.exit.row, "#ffd23f");
 
-      document.title = `L${lvl} ${size}x${size} rooms=${L.rooms.length} links=${L.stats.links} tight=${L.stats.tight} stubs=${L.stats.stubs}`;
+      document.title = `L${lvl} ${size}x${size} rooms=${L.rooms.length} links=${L.stats.links} tight=${L.stats.tight} stubs=${L.stats.stubs} upper=${L.upper.size} pads=${L.lifts.length}`;
       const out = document.createElement("pre");
       out.id = "info";
       out.style.color = "#9fb0c4";

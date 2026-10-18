@@ -197,10 +197,89 @@ function generate(cols, rows, rng) {
   return { grid, rooms, stats };
 }
 
+/* --------------------------------------------------------- the upper level */
+// The low blocks are the level above the floor: their tops are driven on and the
+// gaps between them are hovered over. Lone pillars made that level meaningless,
+// so the layout is built for it: rooms get raised runs - a walkway across the
+// room with one or two gaps to hover, or a plateau to stand on - and the lift
+// pads are put beside them. Nothing is stamped in the start room, in a corridor,
+// or within one cell of a room's edge, so no doorway is ever pinched.
+function stampUpperLevel(grid, rooms, cols, rng) {
+  const stamped = new Set();
+  const roomCells = new Set();
+  for (const room of rooms) {
+    for (let r = room.y; r < room.y + room.h; r++) {
+      for (let c = room.x; c < room.x + room.w; c++) roomCells.add(`${c},${r}`);
+    }
+  }
+  // a cell that touches a corridor is a doorway approach: never raise that
+  const doorway = (c, r) => [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => {
+    const cc = c + dc;
+    const rr = r + dr;
+    return grid[rr] && grid[rr][cc] === "." && !roomCells.has(`${cc},${rr}`);
+  });
+  const set = (c, r) => {
+    if (grid[r][c] !== ".") return false;
+    if (doorway(c, r)) return false;
+    grid[r][c] = "#";
+    stamped.add(`${c},${r}`);
+    return true;
+  };
+
+  const want = Math.max(2, Math.min(6, Math.floor(cols / 8)));
+  const order = rooms.map((_, i) => i).filter((i) => i > 0); // never the start room
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  let made = 0;
+  for (const idx of order) {
+    if (made >= want) break;
+    const room = rooms[idx];
+    const x0 = room.x + 1;
+    const y0 = room.y + 1;
+    const x1 = room.x + room.w - 2;
+    const y1 = room.y + room.h - 2;
+    if (x1 - x0 < 3 || y1 - y0 < 3) continue;
+
+    let cells = 0;
+    if (rng() < 0.32) {
+      // a plateau: somewhere to stand up there, and a chunk out of the floor
+      const pw = 2 + (rng() < 0.45 ? 1 : 0);
+      const ph = 2;
+      const cx = x0 + Math.floor(rng() * Math.max(1, x1 - x0 - pw + 1));
+      const cy = y0 + Math.floor(rng() * Math.max(1, y1 - y0 - ph + 1));
+      for (let r = cy; r < cy + ph; r++) {
+        for (let c = cx; c < cx + pw; c++) if (set(c, r)) cells++;
+      }
+    } else {
+      // a walkway across the room, with gaps in it: the raised route is straight,
+      // the floor route has to go round, and the gaps are what the hover is for
+      const horiz = rng() < 0.55;
+      const len = horiz ? x1 - x0 : y1 - y0;
+      const gaps = new Set();
+      const gapCount = len >= 6 ? 2 : 1;
+      for (let g = 0; g < gapCount; g++) gaps.add(1 + Math.floor(rng() * Math.max(1, len - 1)));
+      if (horiz) {
+        const row = y0 + Math.floor((y1 - y0) / 2);
+        for (let k = 0; k <= len; k++) if (!gaps.has(k) && set(x0 + k, row)) cells++;
+      } else {
+        const col = x0 + Math.floor((x1 - x0) / 2);
+        for (let k = 0; k <= len; k++) if (!gaps.has(k) && set(col, y0 + k)) cells++;
+      }
+    }
+    if (cells >= 3) made++;
+  }
+  return stamped;
+}
+
 /* ------------------------------------------------------------------ level */
 export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = {}) {
   const rng = makeRng(seed);
   const { grid, rooms, stats } = generate(cols, rows, rng);
+  const upper = stampUpperLevel(grid, rooms, cols, rng); // the level above the floor
+  stats.upper = upper.size;
   const isBorderCell = (c, r) => c === 0 || r === 0 || c === cols - 1 || r === rows - 1;
 
   const walls = new Set();
@@ -215,6 +294,11 @@ export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = 
       }
       const key = `${c},${r}`;
       walls.add(key);
+      if (upper.has(key)) {
+        // a raised run: low enough to be flown over, high enough to stand on
+        wallKind.set(key, "O");
+        continue;
+      }
       if (isBorderCell(c, r)) {
         wallKind.set(key, "#");
         continue;
@@ -260,6 +344,19 @@ export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = 
     if (d < 0) continue;
     const score = d + 0.35 * Math.hypot(room.cx - start.col, room.cy - start.row);
     if (score > bestScore) { bestScore = score; exit = { col: room.cx, row: room.cy }; }
+  }
+
+  // a raised run must never swallow the exit cell itself
+  {
+    const key = `${exit.col},${exit.row}`;
+    if (upper.has(key)) {
+      upper.delete(key);
+      grid[exit.row][exit.col] = ".";
+      walls.delete(key);
+      wallKind.delete(key);
+      openCells.push([exit.col, exit.row]);
+      stats.upper--;
+    }
   }
 
   /* ------------------------------------------------------ room character */
@@ -313,18 +410,41 @@ export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = 
       return true;
     });
     const pool = roomy.length >= wantLifts ? roomy : openCells.filter(([c, r]) => reachable(c, r));
+    // a pad is only worth finding if the level above it is worth being on
+    const nearUpper = (c, r) => {
+      for (let dr = -4; dr <= 4; dr++) {
+        for (let dc = -4; dc <= 4; dc++) if (upper.has(`${c + dc},${r + dr}`)) return true;
+      }
+      return false;
+    };
 
     if (pool.length && wantLifts > 0) {
+      const toExit = (c, r) => Math.abs(c - exit.col) + Math.abs(r - exit.row);
+      const push = (c, r) => {
+        if (lifts.length >= wantLifts) return;
+        if (lifts.some((l) => l.col === c && l.row === r)) return;
+        lifts.push({ col: c, row: r });
+      };
+
+      // one pad always stands beside a raised run, so there is something to fly
+      // onto: the such spot nearest the exit
+      const near = pool.filter(([c, r]) => nearUpper(c, r));
+      if (near.length) {
+        let pick = near[0];
+        for (const cell of near) if (toExit(cell[0], cell[1]) < toExit(pick[0], pick[1])) pick = cell;
+        push(pick[0], pick[1]);
+      }
+
       // the staging pad: as near the exit as it is allowed to be
       let pick = null;
       let best = -Infinity;
       for (const [c, r] of pool) {
-        const toExit = Math.abs(c - exit.col) + Math.abs(r - exit.row);
         const fromStart = Math.abs(c - start.col) + Math.abs(r - start.row);
-        const score = -toExit * 1.6 + Math.min(fromStart, 14) * 0.4;
+        const score = -toExit(c, r) * 1.6 + Math.min(fromStart, 14) * 0.4 + (nearUpper(c, r) ? 5 : 0);
         if (score > best) { best = score; pick = [c, r]; }
       }
-      lifts.push({ col: pick[0], row: pick[1] });
+      if (pick) push(pick[0], pick[1]);
+
       // then spread the rest as far from each other and the start as possible
       while (lifts.length < wantLifts) {
         let next = null;
@@ -333,10 +453,11 @@ export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = 
           if (lifts.some((l) => l.col === c && l.row === r)) continue;
           let spacing = Math.hypot(c - start.col, r - start.row) * 1.15;
           for (const l of lifts) spacing = Math.min(spacing, Math.hypot(c - l.col, r - l.row));
+          if (nearUpper(c, r)) spacing += 3;
           if (spacing > bestSpread) { bestSpread = spacing; next = [c, r]; }
         }
         if (!next) break;
-        lifts.push({ col: next[0], row: next[1] });
+        push(next[0], next[1]);
       }
     }
     stats.lifts = lifts.length;
@@ -439,7 +560,7 @@ export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = 
   }
 
   return {
-    cols, rows, walls, wallKind, wallTheme, features, rooms, stats, openCells, start, exit, lifts,
+    cols, rows, walls, wallKind, wallTheme, features, rooms, stats, openCells, start, exit, lifts, upper,
     cellToWorldX, cellToWorldZ, hitsWall, resolve, slide,
     isBorderCell,
     worldOf: (c, r) => ({ x: cellToWorldX(c), z: cellToWorldZ(r) }),

@@ -156,6 +156,40 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
   }
 }
 
+/* the level above the floor: raised runs out of the low blocks */
+for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
+  const L = createLevel({ cols, rows, seed: 1000 + lvl });
+
+  ok(L.upper.size >= 2, `L${lvl}: the level has raised runs (${L.upper.size} block cells)`);
+  ok([...L.upper].every((k) => L.walls.has(k) && L.wallKind.get(k) === "O"),
+    `L${lvl}: every raised cell is a low block, not a wall`);
+
+  const chained = [...L.upper].filter((k) => {
+    const [c, r] = k.split(",").map(Number);
+    return [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dc, dr]) => L.upper.has(`${c + dc},${r + dr}`));
+  }).length;
+  ok(chained >= 4, `L${lvl}: the runs connect up instead of being lone pillars (${chained} joined)`);
+
+  // a run stays a clear cell inside a room, so no doorway is ever pinched
+  const inRoomClear = [...L.upper].every((k) => {
+    const [c, r] = k.split(",").map(Number);
+    return L.rooms.some((room) =>
+      c >= room.x + 1 && c <= room.x + room.w - 2 &&
+      r >= room.y + 1 && r <= room.y + room.h - 2);
+  });
+  ok(inRoomClear, `L${lvl}: runs keep one cell clear of every room edge`);
+
+  ok(!L.upper.has(`${L.start.col},${L.start.row}`), `L${lvl}: the start cell stays open`);
+  ok(!L.upper.has(`${L.exit.col},${L.exit.row}`), `L${lvl}: and so does the exit cell`);
+
+  // the point of the upper level: a pad has to be near enough to use it
+  const padNear = L.lifts.some((l) => [...L.upper].some((k) => {
+    const [c, r] = k.split(",").map(Number);
+    return Math.abs(c - l.col) <= 4 && Math.abs(r - l.row) <= 4;
+  }));
+  ok(padNear, `L${lvl}: a lift pad stands beside the level above`);
+}
+
 /* lift pads: the way up onto the deck above the maze */
 for (const [lvl, cols, rows, count] of [[1, 25, 25, 2], [3, 29, 29, 3], [8, 39, 39, 5]]) {
   const L = createLevel({ cols, rows, seed: 1000 + lvl, liftCount: count });
