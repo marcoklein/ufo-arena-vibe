@@ -46,6 +46,42 @@
         transition: width 0.12s linear;
       }
       #left { color: #fca5a5; }
+
+      /* the lift row: a sign by a charged pad, the clock while you are up */
+      #lift {
+        display: none;
+        align-items: center;
+        gap: 0.55em;
+        margin-top: 0.25em;
+        color: #7df3ff;
+        letter-spacing: 0.08em;
+      }
+      #lift.on { display: flex; }
+      #lift.near #liftwrap { display: none; }
+      #lift.charging { color: #7c8ba1; }
+      #lift.charging #liftbar { background: linear-gradient(90deg, #475569, #94a3b8); }
+      #lift.block { color: #a3e635; }
+      #lift.block #liftbar { background: linear-gradient(90deg, #65a30d, #bef264); }
+      #lift.deny { color: #f87171; }
+      #lift.warn {
+        color: #ff6b6b;
+        animation: huntpulse 0.45s ease-in-out infinite alternate;
+      }
+      #liftwrap {
+        flex: 1;
+        height: 0.5em;
+        background: rgba(148, 163, 184, 0.18);
+        border: 1px solid rgba(125, 243, 255, 0.35);
+        border-radius: 0.4em;
+        overflow: hidden;
+      }
+      #liftbar {
+        height: 100%;
+        width: 100%;
+        background: linear-gradient(90deg, #22d3ee, #a5f3fc);
+        transition: width 0.1s linear;
+      }
+      #lift.warn #liftbar { background: linear-gradient(90deg, #f97316, #ef4444); }
       #hunt {
         display: none;
         margin-top: 0.2em;
@@ -124,6 +160,7 @@
       <div class="top"><span id="lvl">Level 1</span><span id="kills">0 kills</span><span id="snd">sound on</span></div>
       <div id="hpwrap"><div id="hpbar"></div></div>
       <div id="left">0 monsters</div>
+      <div id="lift"><span id="liftlab">HOVER</span><div id="liftwrap"><div id="liftbar"></div></div></div>
       <div id="hunt">&#9650; THE SHADE IS AWAKE &#9650;</div>
     </div>
     <div id="hint"><b>W</b>/<b>S</b> drive &middot; <b>A</b>/<b>D</b> or <b>&larr;</b>/<b>&rarr;</b> turn &middot; <b>Space</b>/click shoot &middot; <b>M</b> sound &middot; <b>R</b> restart</div>

@@ -11,7 +11,8 @@ const ok = (cond, msg) => { console.log((cond ? "  PASS " : "  FAIL ") + msg); i
   const same = a.walls.size === b.walls.size &&
     [...a.walls].every((k) => b.walls.has(k)) &&
     a.start.col === b.start.col && a.start.row === b.start.row &&
-    a.exit.col === b.exit.col && a.exit.row === b.exit.row;
+    a.exit.col === b.exit.col && a.exit.row === b.exit.row &&
+    JSON.stringify(a.lifts) === JSON.stringify(b.lifts);
   ok(same, "same seed produces the same level");
 }
 
@@ -152,6 +153,47 @@ for (const [lvl, cols, rows] of [[1, 25, 25], [3, 29, 29], [8, 39, 39]]) {
     for (let i = 0; i < 400; i++) { const r = L.slide(cx, cz, 0.3, 0); cx = r.x; }
     const want = faceX - COLL - 0.002;
     ok(Math.abs(cx - want) < 0.06 && !L.hitsWall(cx, cz), `L${lvl}: +x cast stops flush at the wall`);
+  }
+}
+
+/* lift pads: the way up onto the deck above the maze */
+for (const [lvl, cols, rows, count] of [[1, 25, 25, 2], [3, 29, 29, 3], [8, 39, 39, 5]]) {
+  const L = createLevel({ cols, rows, seed: 1000 + lvl, liftCount: count });
+
+  ok(L.lifts.length === count, `L${lvl}: ${L.lifts.length} lift pads on the level`);
+  ok(new Set(L.lifts.map((l) => `${l.col},${l.row}`)).size === L.lifts.length,
+    `L${lvl}: every pad has its own cell`);
+
+  const roomy = L.lifts.every(({ col, row }) => {
+    if (L.walls.has(`${col},${row}`)) return false;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (L.walls.has(`${col + dc},${row + dr}`)) return false;
+    }
+    return true;
+  });
+  ok(roomy, `L${lvl}: pads sit on open floor with room around them`);
+
+  const away = L.lifts.every(({ col, row }) =>
+    Math.abs(col - L.start.col) + Math.abs(row - L.start.row) >= 3 &&
+    Math.abs(col - L.exit.col) + Math.abs(row - L.exit.row) >= 4);
+  ok(away, `L${lvl}: pads are kept off the start pad and the exit cell`);
+
+  // every pad can be driven to, and the closest one is a run short of the exit
+  {
+    const seen = new Set([`${L.start.col},${L.start.row}`]);
+    const q = [[L.start.col, L.start.row]];
+    for (let i = 0; i < q.length; i++) {
+      const [c, r] = q[i];
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const k = `${c + dc},${r + dr}`;
+        if (L.walls.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        q.push([c + dc, r + dr]);
+      }
+    }
+    ok(L.lifts.every(({ col, row }) => seen.has(`${col},${row}`)), `L${lvl}: every pad can be driven to`);
+    const toExit = Math.min(...L.lifts.map(({ col, row }) => Math.abs(col - L.exit.col) + Math.abs(row - L.exit.row)));
+    ok(toExit <= 8, `L${lvl}: one pad is a short run from the exit (${toExit} cells)`);
   }
 }
 

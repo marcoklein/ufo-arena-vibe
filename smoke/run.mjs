@@ -459,6 +459,110 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(2);
 }
 
+/* the lift: pads raise the craft exactly one level, onto the block tops */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  UFO.kill(); // clear the room: this block is about the lift, not a fight
+  const audio = UFO.audio;
+  const pads = UFO.pads;
+  const cfg = UFO.liftCfg;
+  ok(pads.length === 2, `level 1 lays out ${pads.length} lift pads`);
+  ok(pads.every((p) => !UFO.stuckAt(p.x, p.z)), "and they stand on open floor");
+  ok(pads.every((p) => !p.used), "a fresh pad is charged");
+  ok(UFO.charge > cfg.time * 0.95, `the hover meter starts full (${UFO.charge.toFixed(1)}s)`);
+
+  // a charged pad within reach says so, so it can be found
+  UFO.move(pads[0].x + 5, pads[0].z);
+  frame(2);
+  ok(els.lift.classList.contains("on") && els.lift.classList.contains("near"),
+    `a pad within reach reads ${els.liftlab.textContent}`);
+
+  const pad = pads[0];
+  UFO.move(pad.x, pad.z);
+  frame(2);
+  ok(UFO.liftUp && UFO.lift > 0, `driving onto it lifts the craft (lift ${UFO.lift.toFixed(2)})`);
+  ok(pad.used, "and the pad is spent until you drive off it");
+  ok(audio.log.includes("liftUp"), "the pad announces the ride");
+
+  frame(60);
+  ok(UFO.lift === 1, "exactly one level up, no more");
+  ok(Math.abs(UFO.alt - cfg.alt) < 1e-6, `which is one low block high (${UFO.alt})`);
+
+  // over open floor there is no ground at that level: hovering costs
+  const c0 = UFO.charge;
+  frame(40);
+  ok(UFO.charge < c0, `no ground underneath: the hover meter runs (${c0.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
+  ok(els.lift.classList.contains("on") && /HOVER/.test(els.liftlab.textContent),
+    `the HUD shows the meter (${els.liftlab.textContent})`);
+
+  // a block top is ground at that level: it stops costing and fills again
+  const block = UFO.blocks[0];
+  UFO.move(block.x, block.z);
+  frame(2);
+  ok(UFO.onBlock, "on a block the craft has ground underneath");
+  ok(/BLOCK LEVEL/.test(els.liftlab.textContent), `and the HUD says so (${els.liftlab.textContent})`);
+  const c1 = UFO.charge;
+  frame(40);
+  ok(UFO.charge > c1, `the meter fills again up there (${c1.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
+  ok(UFO.lift === 1, "without sinking");
+
+  // one level up the low blocks are underneath the hull; taller walls are not
+  ok(!UFO.blockedAt(block.x, block.z), "up there a low block is not in the way");
+  const tall = UFO.highWalls.find((w) => Math.hypot(w.x - block.x, w.z - block.z) < 14) || UFO.highWalls[0];
+  ok(UFO.blockedAt(tall.x, tall.z), "but a real wall still is");
+
+  // the guns are offline up there, and the HUD says why
+  const shots = UFO.bullets.length;
+  down("Space");
+  frame(3);
+  up("Space");
+  ok(UFO.bullets.length === shots, "the lift field has the guns: no shot leaves");
+  ok(els.lift.classList.contains("deny"), "and the HUD flashes to say why");
+
+  // nothing on the floor can reach it
+  const hpUp = UFO.hp;
+  UFO.damage(35);
+  ok(UFO.hp === hpUp, `the floor cannot hurt it while it is up there (${UFO.hp})`);
+
+  // flying over the exit is not reaching it
+  const exitW = UFO.worldOf(UFO.exit.col, UFO.exit.row);
+  UFO.move(exitW.x, exitW.z);
+  frame(3);
+  ok(UFO.state === "playing", "flying over the exit does not clear the level");
+
+  // drain it dry: back to the floor, with a warning on the way
+  UFO.move(pad.x, pad.z); // open floor: nothing at block level underneath
+  let warned = false;
+  for (let i = 0; i < 1400 && UFO.lift > 0; i++) {
+    frame(1);
+    if (audio.log.includes("liftWarn")) warned = true;
+  }
+  ok(UFO.lift === 0, "the meter runs out and the craft comes down");
+  ok(warned, "with a warning before it drops");
+  ok(audio.log.includes("liftFall") && audio.log.includes("liftLand"), "and a fall and a touchdown to go with it");
+  ok(!UFO.stuck, "landing off the wall tops rather than inside them");
+  ok(!/HOVER \d/.test(els.liftlab.textContent), `and the hover clock is gone (${els.liftlab.textContent})`);
+
+  // on the floor it fills back up
+  const c2 = UFO.charge;
+  frame(120);
+  ok(UFO.charge > c2, `on the floor the meter fills again (${c2.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
+
+  // a spent pad does not hand you another flight until you have driven off it
+  UFO.move(pad.x, pad.z);
+  frame(4);
+  ok(UFO.lift === 0, "standing on the pad you used does not launch you again");
+  UFO.move(pad.x + 12, pad.z);
+  frame(2);
+  ok(!pad.used, "driving off it re-arms it");
+
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+}
+
 /* the shots are not balls, and the things that shoot look like guns */
 {
   down("KeyR");

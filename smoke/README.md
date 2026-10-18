@@ -19,15 +19,21 @@ random walk never leaves the craft buried in a wall.
 node test.mjs
 ```
 
+It also checks the lift pads: two and up per level, each on open floor with room
+around it, in its own cell, not on the start or the exit, reachable on foot, and
+one of them a short run from the exit.
+
 ## 2. Gameplay in Node — `smoke/run.mjs`
 
 Boots the **real** `main.js` against a stubbed three.js (`three-mock.js`, wired
 up by `loader.mjs`) and a fake DOM, then drives the actual game loop with
 scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
 blast, parks on top of one and watches it go off on the spot, walks out of one and
-does not, counts what the spitters are carrying, checks that the score is only
-poked by things worth scoring, reaches the exit, advances a level, dies and
-restarts.
+does not, rides a lift pad up one level and checks what that level does (low blocks
+underneath, walls still in the way, the hover meter draining over open floor and
+filling on a block top), counts what the spitters are carrying, checks that the
+score is only poked by things worth scoring, reaches the exit, advances a level,
+dies and restarts.
 
 ```
 node --import ./smoke/loader.mjs smoke/run.mjs
@@ -55,6 +61,8 @@ node smoke/shot.mjs smoke/out/rift.png  "&pose=rift"     # a monster spawn point
 node smoke/shot.mjs smoke/out/mine.png  "&pose=mine"     # a red diamond, spiked and blinking
 node smoke/shot.mjs smoke/out/fuse.png  "&pose=fuse"     # caught in one when it arms
 node smoke/shot.mjs smoke/out/blast.png "&pose=blast"    # ...and the moment it goes off
+node smoke/shot.mjs smoke/out/pad.png    "&pose=pad"       # a lift pad and its level marker
+node smoke/shot.mjs smoke/out/block.png  "&pose=block"     # up one level, over a block top
 node smoke/shot.mjs smoke/out/volley.png "&boom=volley"      # your bolts in the air
 node smoke/shot.mjs smoke/out/seeds.png  "&boom=seeds"       # a spitter with a seed out
 node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"   # freeze mid-fireball
@@ -63,14 +71,17 @@ node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going u
 
 Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 (a shade awake and hunting), `rift`, `mine`, `fuse` (mid-fuse, kill ring out),
-`blast` (the instant after a mine goes off). Extras: `&boom=enemy|player`
+`blast` (the instant after a mine goes off), `pad` (a lift pad from the floor),
+`block` (the craft up one level, standing over a low block). Extras: `&boom=enemy|player`
 (detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
 `&audio=1` (bring the audio up on a key press and report what it did),
 `&boom=volley` (hold fire with a bolt clear of the craft's own glow) and
 `&boom=seeds` (wait for a spitter's chamber to light up, then hold the frame until
-the seed it spits is in the air),
+the seed it spits is in the air), `&lift=1` (take a pad up one level and report the
+level: altitude, meter, whether a block is underneath, whether a wall still
+blocks),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
 The probe also reports `shots` (how many of each kind are in the air).
 
@@ -141,6 +152,8 @@ UFO.enemies, UFO.bullets, UFO.pos, UFO.exit, UFO.yaw
 UFO.rooms, UFO.props, UFO.stats, UFO.explosions, UFO.particles
 UFO.shades, UFO.hunted, UFO.rifts, UFO.riftsOpened, UFO.debris, UFO.splats, UFO.keys
 UFO.mine, UFO.blastAt(d), UFO.audio
+UFO.pads, UFO.blocks, UFO.highWalls, UFO.wallTopAt(x, z), UFO.blockedAt(x, z)
+UFO.lift, UFO.alt, UFO.charge, UFO.liftUp, UFO.onBlock, UFO.liftCfg
 UFO.move(x, z), UFO.aim(x, z), UFO.damage(n), UFO.kill(), UFO.killPlayer(), UFO.stuckAt(x, z)
 
 // sound

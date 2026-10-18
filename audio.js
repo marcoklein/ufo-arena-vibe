@@ -276,6 +276,32 @@ const SFX = {
     // a high harmonic on top so it cuts through the score
     tone(rig, t + 0.05, { type: "square", f0: 620, f1: 1500, dur: 0.6, peak: 0.08, a: 0.12, spread: 40, ...o });
   },
+  // a pad taking the craft up: a column of air with a bright edge on it
+  liftUp(rig, t, o) {
+    tone(rig, t, { type: "sine", f0: 82, f1: 640, dur: 0.85, peak: 0.3, a: 0.02, sub: 0.5, ...o });
+    noiseHit(rig, t, { dur: 0.9, peak: 0.22, bp: 820, sweep: 5200, q: 1.1, ...o });
+    tone(rig, t + 0.1, { type: "square", f0: 210, f1: 840, dur: 0.55, peak: 0.07, a: 0.03, spread: 25, ...o });
+    // and it settles into a note up there
+    tone(rig, t + 0.5, { type: "triangle", f0: midi(76), dur: 0.55, peak: 0.13, a: 0.02, ...o });
+  },
+  // the clock on the deck: two short, insistent beeps
+  liftWarn(rig, t, o) {
+    const f = 1160 + (o.pitch || 0) * 220;
+    tone(rig, t, { type: "square", f0: f, dur: 0.09, peak: 0.24, a: 0.002, ...o });
+    tone(rig, t, { type: "sine", f0: f * 0.5, dur: 0.15, peak: 0.12, a: 0.002, ...o });
+    tone(rig, t + 0.15, { type: "square", f0: f, dur: 0.09, peak: 0.19, a: 0.002, ...o });
+  },
+  // the deck letting go: air falling away underneath
+  liftFall(rig, t, o) {
+    noiseHit(rig, t, { dur: 0.9, peak: 0.2, bp: 4200, sweep: 300, q: 0.9, ...o });
+    tone(rig, t, { type: "sine", f0: 620, f1: 90, dur: 0.85, peak: 0.2, a: 0.01, ...o });
+  },
+  // touchdown
+  liftLand(rig, t, o) {
+    tone(rig, t, { type: "sine", f0: 132, f1: 38, dur: 0.45, peak: 0.42, a: 0.003, ...o });
+    noiseHit(rig, t, { dur: 0.4, peak: 0.3, lp: 1600, sweep: 140, ...o });
+    tone(rig, t, { type: "triangle", f0: 220, f1: 140, dur: 0.2, peak: 0.1, spread: 40, ...o });
+  },
   // it meets a wall: the one that shakes the camera
   shadeCrash(rig, t, o) {
     tone(rig, t, { type: "sine", f0: 98, f1: 27, dur: 0.55, peak: 0.75, a: 0.002, ...o });

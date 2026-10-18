@@ -101,10 +101,14 @@ const SPEC = `(async () => {
   const A = window.GAME_AUDIO;
   const measure = window.MEASURE;
   const names = ["shoot", "hit", "kill", "killShade", "enemyShot", "boom", "mineArm",
-    "mineBeep", "hurt", "death", "exit", "levelUp", "rift", "shadeWake", "shadeCharge", "shadeCrash"];
+    "mineBeep", "hurt", "death", "exit", "levelUp", "rift", "shadeWake", "shadeCharge", "shadeCrash",
+    "liftUp", "liftWarn", "liftFall", "liftLand"];
   const t0 = performance.now();
 
-  const fx = await measure({ seconds: 26, level: 1, music: false, sfx: names, spacing: 1.4 });
+  // the render has to be long enough for the last sound in the list, or that one
+  // measures as silence (which is exactly how liftLand was caught being cut off)
+  const sfxSeconds = 0.7 + names.length * 1.4 + 2;
+  const fx = await measure({ seconds: sfxSeconds, level: 1, music: false, sfx: names, spacing: 1.4 });
   const sfx = Object.fromEntries(Object.entries(fx.windows).map(([k, v]) => [k, { rms: v.rms, peak: v.peak }]));
 
   const scoreAt = async (level, hunted) => {

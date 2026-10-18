@@ -198,7 +198,7 @@ function generate(cols, rows, rng) {
 }
 
 /* ------------------------------------------------------------------ level */
-export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
+export function createLevel({ cols = 25, rows = 25, seed = 1, liftCount = 2 } = {}) {
   const rng = makeRng(seed);
   const { grid, rooms, stats } = generate(cols, rows, rng);
   const isBorderCell = (c, r) => c === 0 || r === 0 || c === cols - 1 || r === rows - 1;
@@ -291,6 +291,57 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
     }
   }
 
+  /* ----------------------------------------------------------- lift pads */
+  // Pads that throw the craft up onto the deck above the maze. They have to sit
+  // on open floor with room around them, they are spread over the level, and one
+  // of them is put as close to the exit as the rules allow, so the last stretch
+  // can be flown in over the guards.
+  const wantLifts = Math.max(0, Math.min(6, Math.round(liftCount)));
+  const lifts = [];
+  {
+    const at = (c, r) => r * cols + c;
+    const reachable = (c, r) => c > 0 && r > 0 && c < cols - 1 && r < rows - 1 && dist[at(c, r)] >= 0;
+    const roomy = openCells.filter(([c, r]) => {
+      if (!reachable(c, r)) return false;
+      // not right under the start pad, and a real run short of the exit, so a
+      // lift is a shortcut over the guard ring rather than a step onto the goal
+      if (Math.abs(c - start.col) + Math.abs(r - start.row) < 3) return false;
+      if (Math.abs(c - exit.col) + Math.abs(r - exit.row) < 4) return false;
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (walls.has(`${c + dc},${r + dr}`)) return false;
+      }
+      return true;
+    });
+    const pool = roomy.length >= wantLifts ? roomy : openCells.filter(([c, r]) => reachable(c, r));
+
+    if (pool.length && wantLifts > 0) {
+      // the staging pad: as near the exit as it is allowed to be
+      let pick = null;
+      let best = -Infinity;
+      for (const [c, r] of pool) {
+        const toExit = Math.abs(c - exit.col) + Math.abs(r - exit.row);
+        const fromStart = Math.abs(c - start.col) + Math.abs(r - start.row);
+        const score = -toExit * 1.6 + Math.min(fromStart, 14) * 0.4;
+        if (score > best) { best = score; pick = [c, r]; }
+      }
+      lifts.push({ col: pick[0], row: pick[1] });
+      // then spread the rest as far from each other and the start as possible
+      while (lifts.length < wantLifts) {
+        let next = null;
+        let bestSpread = -Infinity;
+        for (const [c, r] of pool) {
+          if (lifts.some((l) => l.col === c && l.row === r)) continue;
+          let spacing = Math.hypot(c - start.col, r - start.row) * 1.15;
+          for (const l of lifts) spacing = Math.min(spacing, Math.hypot(c - l.col, r - l.row));
+          if (spacing > bestSpread) { bestSpread = spacing; next = [c, r]; }
+        }
+        if (!next) break;
+        lifts.push({ col: next[0], row: next[1] });
+      }
+    }
+    stats.lifts = lifts.length;
+  }
+
   /* ---------------------------------------------------------- collision */
   const halfCols = (cols - 1) / 2;
   const halfRows = (rows - 1) / 2;
@@ -300,9 +351,12 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
   const rowOf = (z) => Math.floor(z / CELL + halfRows + 0.5);
   const SKIN = 2e-3;
 
-  // minimal push to separate a circle from wall cell (c,r); null if no overlap
-  function pushOut(x, z, c, r, rad) {
+  // minimal push to separate a circle from wall cell (c,r); null if no overlap.
+  // `skip(c,r)` lets a caller fly over chosen wall cells (see the hover lift in
+  // main.js: one block up, everything lower than the hull is not in the way).
+  function pushOut(x, z, c, r, rad, skip) {
     if (!walls.has(`${c},${r}`)) return null;
+    if (skip && skip(c, r)) return null;
     const cx = cellToWorldX(c);
     const cz = cellToWorldZ(r);
     const h = CELL / 2;
@@ -330,18 +384,18 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
     return { px: 0, pz: cz + h + target - z };
   }
 
-  function hitsWall(x, z, rad = COLL) {
+  function hitsWall(x, z, rad = COLL, skip = null) {
     const c0 = colOf(x - rad);
     const c1 = colOf(x + rad);
     const r0 = rowOf(z - rad);
     const r1 = rowOf(z + rad);
     for (let c = c0; c <= c1; c++)
       for (let r = r0; r <= r1; r++)
-        if (pushOut(x, z, c, r, rad)) return true;
+        if (pushOut(x, z, c, r, rad, skip)) return true;
     return false;
   }
 
-  function resolve(x, z, rad = COLL) {
+  function resolve(x, z, rad = COLL, skip = null) {
     for (let it = 0; it < 8; it++) {
       let best = null;
       let bestDepth = 0;
@@ -351,7 +405,7 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
       const r1 = rowOf(z + rad);
       for (let c = c0; c <= c1; c++)
         for (let r = r0; r <= r1; r++) {
-          const p = pushOut(x, z, c, r, rad);
+          const p = pushOut(x, z, c, r, rad, skip);
           if (!p) continue;
           const d = Math.hypot(p.px, p.pz);
           if (d > bestDepth) { bestDepth = d; best = p; }
@@ -363,9 +417,9 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
     return { x, z };
   }
 
-  function slide(x, z, dx, dz, rad = COLL) {
-    if (hitsWall(x, z, rad)) {
-      const r0 = resolve(x, z, rad);
+  function slide(x, z, dx, dz, rad = COLL, skip = null) {
+    if (hitsWall(x, z, rad, skip)) {
+      const r0 = resolve(x, z, rad, skip);
       x = r0.x;
       z = r0.z;
     }
@@ -373,19 +427,19 @@ export function createLevel({ cols = 25, rows = 25, seed = 1 } = {}) {
     const sx = dx / steps;
     const sz = dz / steps;
     for (let i = 0; i < steps; i++) {
-      const p = resolve(x + sx, z + sz, rad);
-      if (!hitsWall(p.x, p.z, rad)) { x = p.x; z = p.z; continue; }
-      const a = resolve(x + sx, z, rad);
-      if (!hitsWall(a.x, a.z, rad)) { x = a.x; z = a.z; continue; }
-      const b = resolve(x, z + sz, rad);
-      if (!hitsWall(b.x, b.z, rad)) { x = b.x; z = b.z; continue; }
+      const p = resolve(x + sx, z + sz, rad, skip);
+      if (!hitsWall(p.x, p.z, rad, skip)) { x = p.x; z = p.z; continue; }
+      const a = resolve(x + sx, z, rad, skip);
+      if (!hitsWall(a.x, a.z, rad, skip)) { x = a.x; z = a.z; continue; }
+      const b = resolve(x, z + sz, rad, skip);
+      if (!hitsWall(b.x, b.z, rad, skip)) { x = b.x; z = b.z; continue; }
       break;
     }
     return { x, z };
   }
 
   return {
-    cols, rows, walls, wallKind, wallTheme, features, rooms, stats, openCells, start, exit,
+    cols, rows, walls, wallKind, wallTheme, features, rooms, stats, openCells, start, exit, lifts,
     cellToWorldX, cellToWorldZ, hitsWall, resolve, slide,
     isBorderCell,
     worldOf: (c, r) => ({ x: cellToWorldX(c), z: cellToWorldZ(r) }),

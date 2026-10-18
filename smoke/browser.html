@@ -94,6 +94,26 @@
         UFO.move(t.x + 7, t.z + 7);
         UFO.aim(t.x, t.z);
         await frames(30);
+      } else if (pose === "pad") {
+        // a lift pad seen from the floor, from far enough to judge the markings
+        const p = UFO.pads[0];
+        const v = vantage(p.x, p.z, 9) || { x: p.x + 7, z: p.z + 7 };
+        UFO.move(v.x, v.z);
+        UFO.aim(p.x, p.z);
+        await frames(24);
+      } else if (pose === "block") {
+        // up one level, standing over the nearest low block
+        const p = UFO.pads[0];
+        UFO.move(p.x, p.z);
+        await frames(50);
+        const b = UFO.blocks.reduce((best, w) => {
+          const d = Math.hypot(w.x - p.x, w.z - p.z);
+          return !best || d < best.d ? { ...w, d } : best;
+        }, null);
+        if (b) {
+          UFO.move(b.x, b.z);
+          await frames(24);
+        }
       } else if (pose === "mine") {
         // an armed-adjacent look at one mine from outside its arming range
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
@@ -269,6 +289,30 @@
         }
       }
 
+      // ?lift=1 — take a pad up one level and report what the level does
+      const liftInfo = {};
+      if (new URLSearchParams(location.search).has("lift")) {
+        const pad = UFO.pads[0];
+        UFO.move(pad.x, pad.z);
+        await frames(45);
+        liftInfo.up = +UFO.lift.toFixed(2);
+        liftInfo.alt = +UFO.alt.toFixed(2);
+        liftInfo.charge = +UFO.charge.toFixed(2);
+        liftInfo.blockUnder = UFO.onBlock;
+        liftInfo.label = document.getElementById("liftlab").textContent;
+        const b = UFO.blocks[0];
+        if (b) {
+          UFO.move(b.x, b.z);
+          await frames(14);
+          liftInfo.onBlock = UFO.onBlock;
+          liftInfo.chargeOnBlock = +UFO.charge.toFixed(2);
+          liftInfo.blockedOverBlock = UFO.blockedAt(b.x, b.z);
+        }
+        const tall = UFO.highWalls[0];
+        if (tall) liftInfo.blockedOverWall = UFO.blockedAt(tall.x, tall.z);
+        liftInfo.pads = UFO.pads.length;
+      }
+
       // ?mine=1 — arm a red diamond, back out of the ring, and report the blast
       const mine = {};
       if (new URLSearchParams(location.search).has("mine")) {
@@ -346,6 +390,7 @@
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
           soundTag: document.getElementById("snd") && document.getElementById("snd").textContent,
+          lift: liftInfo,
           shots: { mine: UFO.bullets.length, theirs: UFO.eBullets.length, seeds: UFO.eBullets.filter((b) => b.seed).length },
           mine,
           audio,

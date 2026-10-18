@@ -64,10 +64,36 @@ const RIFT = {
   grace: (n) => Math.max(7, 20 - n), // breathing room at the start of a level
 };
 
+// The blocks standing on the floor are the level above it: every block top is a
+// place to be, and a lift pad raises the craft exactly that one block.
+const BLOCK_H = 2.6;
+
+/* The lift. A pad picks the craft up exactly one level - the height of a low
+   block - and holds it there. Up on that level there is no floor, only the block
+   tops, so the craft is only *supported* where a block is underneath; everywhere
+   else it is hovering, and hovering is what drains the meter. The meter fills up
+   again on the floor (and on a block top), and when it is empty the craft sinks
+   back down. */
+const LIFT = {
+  alt: BLOCK_H,     // one level: exactly the height of a low block
+  time: 7,          // seconds of hover in a full meter
+  drain: 1,         // meter per second while there is no ground underneath
+  regen: 0.8,       // and how fast it fills on the ground
+  minCharge: 1.5,   // no pad will lift you on less than this
+  rise: 0.55,       // climb time
+  fall: 0.7,        // and back down
+  speed: 1.25,      // speed while up on the block level
+  padR: 2.1,        // drive this close to a charged pad and it takes you up
+  armR: 4.5,        // drive this far off a used pad and it re-arms
+  warn: 1.8,        // the last stretch: the HUD and the drop marker go red
+  safe: 0.45,       // above this the floor cannot reach you
+  fly: 0.85,        // above this the blocks are underneath, not in the way
+};
+
 const WALL_STYLE = {
   "#": { h: WALL_H, color: 0x3b4a5e },  // plain rock
   X: { h: TOWER_H, color: 0x2f6b70 },   // tower
-  O: { h: 2.6, color: 0x7a4f3a },       // low block
+  O: { h: BLOCK_H, color: 0x7a4f3a },   // low block: the level above the floor
   B: { h: BORDER_H, color: 0x33415a },  // perimeter
 };
 const CROWN_COOL = 0x49b8ff;
@@ -78,6 +104,7 @@ const levelEnemies = (n) => Math.min(30, 5 + n * 2);  // roaming hunters
 const levelGuards = (n) => Math.min(12, 2 + n);       // defenders ringing the exit
 const levelLurkers = (n) => Math.min(4, 1 + Math.floor((n - 1) / 2)); // shades
 const levelRifts = (n) => Math.min(8, 3 + Math.floor(n / 2));         // spawn points
+const levelLifts = (n) => Math.min(6, 2 + Math.floor((n - 1) / 2));    // lift pads
 
 const ROAM_AGGRO = 32;   // how far a roamer goes looking for you
 const GUARD_AGGRO = 15;  // how far an exit defender strays from its post
@@ -437,6 +464,7 @@ function buildWorld(L) {
     }
     wallMesh.instanceMatrix.needsUpdate = true;
     if (wallMesh.instanceColor) wallMesh.instanceColor.needsUpdate = true;
+    wallTop = heights;
   }
   worldGroup.add(wallMesh);
   currentWallMesh = wallMesh;
@@ -564,7 +592,90 @@ function buildWorld(L) {
   const pillar = new THREE.Mesh(exitPillarGeo, exitPillarMat);
   pillar.position.set(L.cellToWorldX(L.exit.col), 7, L.cellToWorldZ(L.exit.row));
   worldGroup.add(pillar);
+
+  buildLiftPads(L);
 }
+
+/* ------------------------------------------------------------- lift pads */
+// A pad is a light well: a ring on the floor, a faint column all the way up to
+// the deck and a cap ring at deck height, so from across the level you can see
+// both where it is and that there is a level above you to get to.
+const liftRingGeo = new THREE.RingGeometry(1.15, 1.6, 40);
+const liftDiscGeo = new THREE.RingGeometry(0, 1.12, 40);
+const liftColumnGeo = new THREE.CylinderGeometry(1.25, 1.25, LIFT.alt, 20, 1, true);
+const liftCapGeo = new THREE.RingGeometry(0.9, 1.3, 36);
+const liftArrowGeo = new THREE.ConeGeometry(0.34, 0.62, 4);
+const LIFT_COOL = 0x5ef0ff;
+
+function buildLiftPad(x, z) {
+  const group = new THREE.Group();
+  const mk = (opacity) => new THREE.MeshBasicMaterial({
+    color: LIFT_COOL, transparent: true, opacity, side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+  });
+  const ringMat = mk(0.55);
+  const ring = new THREE.Mesh(liftRingGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.06;
+  group.add(ring);
+
+  const discMat = mk(0.12);
+  const disc = new THREE.Mesh(liftDiscGeo, discMat);
+  disc.rotation.x = -Math.PI / 2;
+  disc.position.y = 0.05;
+  group.add(disc);
+
+  const colMat = mk(0.05);
+  const column = new THREE.Mesh(liftColumnGeo, colMat);
+  column.position.y = LIFT.alt / 2;
+  group.add(column);
+
+  const capMat = mk(0.4);
+  const cap = new THREE.Mesh(liftCapGeo, capMat);
+  cap.rotation.x = -Math.PI / 2;
+  cap.position.y = LIFT.alt;
+  group.add(cap);
+
+  const arrowMat = mk(0.85);
+  const arrow = new THREE.Mesh(liftArrowGeo, arrowMat);
+  arrow.position.y = 2.1;
+  group.add(arrow);
+
+  group.position.set(x, 0, z);
+  worldGroup.add(group);
+  return {
+    x, z, group, ring, ringMat, disc, discMat, column, colMat, cap, capMat, arrow, arrowMat,
+    used: false, t: decor() * 9,
+  };
+}
+
+function buildLiftPads(L) {
+  pads = [];
+  for (const cell of L.lifts) {
+    pads.push(buildLiftPad(L.cellToWorldX(cell.col), L.cellToWorldZ(cell.row)));
+  }
+}
+
+// Where the craft would come down: the floor, or the top of whatever wall is
+// under it. The marker turns red when the clock is nearly out.
+function wallTopAt(x, z) {
+  const cell = level.cellOf(x, z);
+  return wallTop.get(`${cell.col},${cell.row}`) ?? 0.06;
+}
+
+const dropRingGeo = new THREE.RingGeometry(0.72, 1.02, 30);
+const dropRingMat = new THREE.MeshBasicMaterial({
+  color: 0x8ff6ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+});
+const dropRingWarnMat = new THREE.MeshBasicMaterial({
+  color: 0xff6b6b, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
+});
+const dropRing = new THREE.Mesh(dropRingGeo, dropRingMat);
+dropRing.rotation.x = -Math.PI / 2;
+dropRing.visible = false;
+scene.add(dropRing);
 
 /* ------------------------------------------------------------------ player */
 // Built around a unit-radius disc (the hull silhouette is r = 1), so anything
@@ -886,6 +997,18 @@ function buildMine(x, z) {
 
 let enemies = [];
 
+// Wall cells in world units, filtered by kind: the probes and the tests use it to
+// find a low block to stand on or a real wall to be stopped by.
+function cellsOfKind(kind) {
+  const out = [];
+  for (const [key, k] of level.wallKind) {
+    if (kind && !kind(k)) continue;
+    const [c, r] = key.split(",").map(Number);
+    out.push({ col: c, row: r, x: level.cellToWorldX(c), z: level.cellToWorldZ(r) });
+  }
+  return out;
+}
+
 function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0 } = {}) {
   if (type === "lurker") return spawnShade(x, z, power);
   const spec = ENEMY_SPEC[type];
@@ -1157,6 +1280,16 @@ const BOOM = {
     hot: type === "spitter" ? 0xf4e9ff : 0xfff2d4,
     count: 46, speed: 19, size: 0.85, life: 0.95,
     shell: 2.2, shock: 4.2, glow: 6.5, flash: 340,
+  }),
+  // a pad throwing the craft up: a ring of light and dust off the floor
+  lift: () => ({
+    color: 0x5ef0ff, hot: 0xf2ffff, count: 30, speed: 13, size: 0.7, life: 0.8,
+    shock: 3.4, glow: 2.2, flash: 120,
+  }),
+  // and the touchdown: dust, no fire
+  land: () => ({
+    color: 0x8fa8bd, hot: 0xe8f4ff, count: 26, speed: 9, size: 0.6, life: 0.7,
+    gravity: 6, shock: 2.8, blending: "normal",
   }),
   // a bullet puckering out against rock
   spark: () => ({
@@ -1613,6 +1746,7 @@ function wakeShade(e) {
 
 function shadeKills(e) {
   if (state !== "playing") return;
+  if (airborne()) return; // it cannot reach the deck either
   killEnemy(e);
   killPlayer();
 }
@@ -1993,6 +2127,9 @@ const el = {
   hurt: document.getElementById("hurt"),
   hunt: document.getElementById("hunt"),
   veil: document.getElementById("huntveil"),
+  lift: document.getElementById("lift"),
+  liftLab: document.getElementById("liftlab"),
+  liftBar: document.getElementById("liftbar"),
 };
 
 const GAME = { level: 1, kills: 0 };
@@ -2008,6 +2145,34 @@ let elapsed = 0;
 let hunted = false;
 let huntT = 0;
 let huntVeil = 0;
+
+// the level above the floor: the block tops
+let lift = 0;          // 0 = on the floor, 1 = up on the block level (smoothed)
+let liftUp = false;    // is the craft trying to be up there
+let charge = LIFT.time; // the hover meter, in seconds
+let liftWarned = 0;    // which warning has fired
+let liftHudState = ""; // "off" | "near" | "hover" | "block"
+let liftDenyT = 0;     // HUD flash when the guns are asked for mid-hover
+let pads = [];
+let wallTop = new Map();
+
+// Is the craft high enough that the floor cannot touch it?
+const airborne = () => lift >= LIFT.safe;
+
+// How high under the craft has to be clear for it to pass: everything lower than
+// the hull is flown over, everything taller still blocks. At floor level nothing
+// is clear, so the maze is exactly what it was.
+const belly = () => HOVER + lift * LIFT.alt - 0.85;
+function overWalls(c, r) {
+  const h = wallTop.get(`${c},${r}`);
+  return h !== undefined && h < belly();
+}
+
+// Ground at the level the craft is at: a block top under it, not the floor far
+// below. This is what decides between "standing on the level" and "hovering".
+function onBlockLevel() {
+  return wallTopAt(pos.x, pos.z) >= BLOCK_H * 0.8;
+}
 
 const pos = new THREE.Vector3();
 let yaw = 0;
@@ -2053,7 +2218,9 @@ function toggleSound() {
 function startLevel(n) {
   GAME.level = n;
   decor = makeRng(777 + n);
-  level = createLevel({ cols: levelSize(n), rows: levelSize(n), seed: 1000 + n });
+  level = createLevel({
+    cols: levelSize(n), rows: levelSize(n), seed: 1000 + n, liftCount: levelLifts(n),
+  });
   buildWorld(level);
   clearEntities();
   clearExplosions();
@@ -2062,6 +2229,19 @@ function startLevel(n) {
   ufo.visible = true;
 
   pos.set(level.cellToWorldX(level.start.col), HOVER, level.cellToWorldZ(level.start.row));
+  lift = 0;
+  liftUp = false;
+  charge = LIFT.time;
+  liftWarned = 0;
+  liftDenyT = 0;
+  liftHudState = "";
+  el.lift.classList.remove("on");
+  el.lift.classList.remove("warn");
+  el.lift.classList.remove("near");
+  el.lift.classList.remove("block");
+  el.lift.classList.remove("charging");
+  el.lift.classList.remove("deny");
+  el.liftBar.style.width = "100%";
   yaw = 0;
   bank = 0;
   bobT = 0;
@@ -2164,6 +2344,7 @@ function killPlayer() {
 // caught next to a mine is never a free walk-away.
 function hurtPlayer(dmg, { pierce = false } = {}) {
   if (state !== "playing" || (hurtT > 0 && !pierce)) return;
+  if (airborne()) return; // nothing on the floor reaches the deck
   hp -= dmg;
   hurtT = HURT_COOLDOWN;
   hurtFlash = Math.min(1, hurtFlash + 0.5 + dmg * 0.02);
@@ -2246,8 +2427,9 @@ function stepMine(e, dt) {
   e.hitT = Math.max(0, e.hitT - dt);
   e.wanderT += dt;
 
-  // right over the middle of it: no fuse, no driving through
-  if (d < MINE.tripR) {
+  // right over the middle of it: no fuse, no driving through. Up on the deck
+  // you are not on top of it at all.
+  if (!airborne() && d < MINE.tripR) {
     detonateMine(e);
     return;
   }
@@ -2296,11 +2478,18 @@ function stepMine(e, dt) {
   } else {
     idleStep(e, dt);
   }
-  if (d < (e.r || ENEMY_R) + RADIUS + 0.2) armMine(e);
+  if (!airborne() && d < (e.r || ENEMY_R) + RADIUS + 0.2) armMine(e);
 }
 
 function tryFire() {
-  if (fireT > 0 || state !== "playing") return;
+  if (state !== "playing") return;
+  if (lift > 0.02) {
+    // the lift field has the guns: say so on the HUD instead of eating the input
+    el.lift.classList.add("deny");
+    liftDenyT = 0.28;
+    return;
+  }
+  if (fireT > 0) return;
   fireT = FIRE_COOLDOWN;
   const fx = Math.sin(yaw);
   const fz = -Math.cos(yaw);
@@ -2310,6 +2499,124 @@ function tryFire() {
   muzzleT = 0.06;
   gameAudio.sfx("shoot");
   gameAudio.poke(0.14);
+}
+
+/* ------------------------------------------------------------- the lift */
+// Pads take the craft up one level onto the block tops. Up there the floor is
+// out of reach: where a block is underneath it is supported and the meter fills,
+// where there is only open floor below it is hovering and the meter runs. Empty
+// meter, back down to the floor, where it fills again.
+function updateLift(dt) {
+  let near = false;
+  const charged = charge >= LIFT.minCharge;
+  for (const p of pads) {
+    p.t += dt;
+    // a used pad re-arms once you have driven off it again
+    if (p.used && lift <= 0.001 && Math.hypot(pos.x - p.x, pos.z - p.z) > LIFT.armR) p.used = false;
+    const ready = !p.used && charged;
+    const pulse = 0.5 + 0.5 * Math.sin(p.t * 2.6);
+    p.ring.rotation.z = p.t * (ready ? 0.7 : 0.14);
+    p.ringMat.opacity = ready ? 0.42 + pulse * 0.28 : 0.09;
+    p.discMat.opacity = ready ? 0.1 + pulse * 0.07 : 0.03;
+    p.colMat.opacity = ready ? 0.05 + pulse * 0.04 : 0.012;
+    p.capMat.opacity = ready ? 0.26 + pulse * 0.3 : 0.05;
+    p.arrow.visible = ready;
+    p.arrow.position.y = 1.15 + Math.sin(p.t * 2.2) * 0.12;
+    p.arrow.rotation.y = p.t * 1.3;
+    if (!p.used && lift <= 0.001 && Math.hypot(pos.x - p.x, pos.z - p.z) < 9) near = true;
+  }
+
+  // a charged pad under the craft takes it up exactly one level
+  if (state === "playing" && lift <= 0.001) {
+    for (const p of pads) {
+      if (p.used || !charged) continue;
+      if (Math.hypot(pos.x - p.x, pos.z - p.z) > LIFT.padR) continue;
+      p.used = true;
+      liftUp = true;
+      liftWarned = 0;
+      gameAudio.sfx("liftUp", { x: p.x, z: p.z });
+      gameAudio.poke(0.5);
+      spawnBurst(p.x, 0.25, p.z, BOOM.lift());
+      shake = Math.min(1.1, shake + 0.2);
+      break;
+    }
+  }
+
+  const held = lift > 0.5 && onBlockLevel(); // a block top under the craft
+
+  if (liftUp) {
+    if (lift < 1) {
+      lift = Math.min(1, lift + dt / LIFT.rise);
+    } else if (held) {
+      // standing on the level: no cost, and it fills back up
+      charge = Math.min(LIFT.time, charge + dt * LIFT.regen);
+      liftWarned = 0;
+    } else {
+      // no ground underneath: this is the hover, and it costs
+      charge -= dt * LIFT.drain;
+      if (liftWarned === 0 && charge <= LIFT.warn) {
+        liftWarned = 1;
+        gameAudio.sfx("liftWarn");
+      } else if (liftWarned === 1 && charge <= LIFT.warn * 0.4) {
+        liftWarned = 2;
+        gameAudio.sfx("liftWarn", { pitch: 1 });
+      }
+      if (charge <= 0) {
+        charge = 0;
+        liftUp = false;
+        gameAudio.sfx("liftFall");
+      }
+    }
+  } else if (lift > 0) {
+    const was = lift;
+    lift = Math.max(0, lift - dt / LIFT.fall);
+    // coming down: whatever is still too tall for the hull pushes it aside
+    if (lift < LIFT.fly) {
+      const r = level.resolve(pos.x, pos.z, RADIUS, overWalls);
+      pos.x = r.x;
+      pos.z = r.z;
+    }
+    if (was > 0 && lift === 0) {
+      spawnBurst(pos.x, 0.2, pos.z, BOOM.land());
+      shake = Math.min(1.2, shake + 0.32);
+      gameAudio.sfx("liftLand", { x: pos.x, z: pos.z });
+    }
+  }
+
+  // on the floor the meter fills up again
+  if (!liftUp && lift <= 0.001) charge = Math.min(LIFT.time, charge + dt * LIFT.regen);
+
+  if (liftDenyT > 0) {
+    liftDenyT -= dt;
+    if (liftDenyT <= 0) el.lift.classList.remove("deny");
+  }
+
+  // the HUD row: a sign by a charged pad, the meter while you are up
+  const key = lift > 0.001 || liftUp ? (held ? "block" : "hover") : near ? (charged ? "near" : "charging") : "off";
+  if (key !== liftHudState) {
+    liftHudState = key;
+    for (const c of ["on", "near", "block", "charging", "warn"]) el.lift.classList.remove(c);
+    if (key !== "off") el.lift.classList.add("on");
+    if (key === "near") el.lift.classList.add("near");
+    if (key === "block") el.lift.classList.add("block");
+    if (key === "charging") el.lift.classList.add("charging");
+  }
+  if (key === "hover" || key === "block") {
+    const left = Math.max(0, charge);
+    el.liftLab.textContent = key === "block" ? "BLOCK LEVEL" : `HOVER ${left.toFixed(1)}s`;
+    el.liftBar.style.width = `${Math.min(100, (left / LIFT.time) * 100).toFixed(1)}%`;
+    if (key === "hover" && left <= LIFT.warn) el.lift.classList.add("warn");
+    else el.lift.classList.remove("warn");
+  } else if (key === "near") {
+    el.liftLab.textContent = "LIFT READY";
+    el.liftBar.style.width = "100%";
+  } else if (key === "charging") {
+    el.liftLab.textContent = "LIFT CHARGING";
+    el.liftBar.style.width = `${Math.min(100, (charge / LIFT.time) * 100).toFixed(0)}%`;
+  } else {
+    el.liftLab.textContent = "HOVER";
+    el.liftBar.style.width = "100%";
+  }
 }
 
 /* ------------------------------------------------------------------- step */
@@ -2330,19 +2637,30 @@ function updateUfo(dt, thrust, turn) {
   const k = 1 - Math.exp(-10 * dt);
   bank += (-turn * MAX_BANK - bank) * k;
 
-  const bob = Math.sin(bobT * 3) * 0.07;
-  const rigY = HOVER + bob;
+  const alt = lift * LIFT.alt;
+  const bob = Math.sin(bobT * 3) * (0.07 + lift * 0.11);
+  const rigY = HOVER + alt + bob;
   rig.position.set(pos.x, rigY, pos.z);
   rig.rotation.y = -yaw;
-  ufo.rotation.set(-thrust * 0.05, 0, bank);
+  ufo.rotation.set(-thrust * 0.05 * (1 - lift * 0.5), 0, bank * (1 + lift * 0.35));
 
   const beamH = Math.max(0.1, rigY - 0.5 - 0.06);
-  beam.scale.set(1, beamH, 1);
+  beam.scale.set(1 + lift * 0.45, beamH, 1 + lift * 0.45);
   beam.position.set(pos.x, 0.06 + beamH / 2, pos.z);
-  beam.material.opacity = 0.06 + pulse * 0.05;
+  beam.material.opacity = (0.06 + pulse * 0.05) * (1 - lift * 0.45);
 
-  playerLight.position.set(pos.x, HOVER + 0.55, pos.z);
-  glow.position.set(pos.x, HOVER + 0.5, pos.z);
+  playerLight.position.set(pos.x, rigY + 0.55, pos.z);
+  glow.position.set(pos.x, rigY + 0.5, pos.z);
+
+  // where it would come down, marked on the floor (or on the roof) below
+  dropRing.visible = lift > 0.03;
+  if (dropRing.visible) {
+    dropRing.position.set(pos.x, wallTopAt(pos.x, pos.z) + 0.05, pos.z);
+    dropRing.scale.setScalar(1 + Math.sin(bobT * 4) * 0.06);
+    const warn = liftUp && !onBlockLevel() && charge <= LIFT.warn;
+    dropRing.material = warn ? dropRingWarnMat : dropRingMat;
+    dropRing.material.opacity = 0.22 + lift * 0.3;
+  }
 }
 
 function step(dt) {
@@ -2361,7 +2679,10 @@ function step(dt) {
   if (thrust) {
     const fx = Math.sin(yaw);
     const fz = -Math.cos(yaw);
-    const r = level.slide(pos.x, pos.z, fx * thrust * SPEED * dt, fz * thrust * SPEED * dt);
+    const sp = SPEED * (lift >= LIFT.fly ? LIFT.speed : 1);
+    // one level up the low blocks are underneath: everything taller still stops
+    // the craft, so the maze is only opened up by exactly the height it gained
+    const r = level.slide(pos.x, pos.z, fx * thrust * sp * dt, fz * thrust * sp * dt, RADIUS, overWalls);
     pos.x = r.x;
     pos.z = r.z;
   }
@@ -2409,7 +2730,7 @@ function updateEnemies(dt) {
       idleStep(e, dt);
       e.fireT = Math.max(e.fireT, 0); // no pot-shots from across the level
     }
-    if (d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG * 0.5);
+    if (!airborne() && d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG * 0.5);
 
     e.hitT = Math.max(0, e.hitT - dt);
     e.recoilT = Math.max(0, e.recoilT - dt);
@@ -2473,7 +2794,7 @@ function updateBullets(dt) {
     let kill = b.life <= 0;
     let hitRock = false;
     if (!kill && level.hitsWall(b.x, b.z, BULLET_R)) { kill = true; hitRock = true; }
-    if (!kill && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
+    if (!kill && !airborne() && Math.hypot(pos.x - b.x, pos.z - b.z) < RADIUS + BULLET_R) {
       hurtPlayer(b.dmg);
       kill = true;
     }
@@ -2488,6 +2809,7 @@ function updateBullets(dt) {
 }
 
 function checkExit() {
+  if (lift > 0.05) return; // flying over the exit is not reaching it
   const ex = level.cellToWorldX(level.exit.col);
   const ez = level.cellToWorldZ(level.exit.row);
   if (Math.hypot(pos.x - ex, pos.z - ez) < CELL * 0.5) {
@@ -2551,8 +2873,8 @@ function updateCamera(dt) {
   camPos.x += (pos.x - fx * CAM_DIST - camPos.x) * k;
   camPos.z += (pos.z - fz * CAM_DIST - camPos.z) * k;
 
-  camAnchor.set(pos.x, HOVER + 0.8, pos.z);
-  camDesired.set(camPos.x, CAM_HEIGHT, camPos.z);
+  camAnchor.set(pos.x, HOVER + lift * LIFT.alt + 0.8, pos.z);
+  camDesired.set(camPos.x, CAM_HEIGHT + lift * LIFT.alt * 0.6, camPos.z);
   camDir.copy(camDesired).sub(camAnchor);
   const dist = camDir.length();
   camDir.divideScalar(dist || 1);
@@ -2572,7 +2894,7 @@ function updateCamera(dt) {
     shake = Math.max(0, shake - dt * 2.2);
   }
 
-  camera.lookAt(pos.x + fx * 1.5, HOVER + 0.6, pos.z + fz * 1.5);
+  camera.lookAt(pos.x + fx * 1.5, HOVER + lift * LIFT.alt + 0.6, pos.z + fz * 1.5);
 }
 
 function updateDamageUi(dt) {
@@ -2614,6 +2936,18 @@ globalThis.UFO = {
   get splats() { return splats; },
   get hunted() { return hunted; },
   get mine() { return MINE; },
+  get lift() { return lift; },
+  get liftUp() { return liftUp; },
+  get charge() { return charge; },
+  get alt() { return lift * LIFT.alt; },
+  get pads() { return pads; },
+  get liftCfg() { return LIFT; },
+  get onBlock() { return onBlockLevel(); },
+  // wall cells by kind, in world units (the tests and the probe steer by these)
+  get blocks() { return cellsOfKind((k) => k === "O"); },
+  get highWalls() { return cellsOfKind((k) => k !== "O"); },
+  blockedAt: (x, z) => level.hitsWall(x, z, RADIUS, overWalls),
+  wallTopAt: (x, z) => wallTopAt(x, z),
   blastAt: (d) => blastDamage(d),
   get audio() { return gameAudio; },
   killPlayer,
@@ -2644,6 +2978,7 @@ renderer.setAnimationLoop(() => {
 
   if (state === "playing") {
     step(dt);
+    updateLift(dt);
     updateEnemies(dt);
     updateBullets(dt);
     checkExit();
@@ -2652,6 +2987,7 @@ renderer.setAnimationLoop(() => {
     const ez = level.cellToWorldZ(level.exit.row);
     if (Math.hypot(pos.x - ex, pos.z - ez) < 26) gameAudio.poke(0.55 * dt);
   } else {
+    updateLift(dt);
     updateUfo(dt, 0, 0);
     if (state === "cleared") {
       clearedT += dt;
