@@ -1637,10 +1637,14 @@ function stepShade(e, dt) {
     e.poolMat.opacity = 0.5;
     const moved = Math.hypot(e.x - px, e.z - pz);
     if (e.chargeT > LURK.dashTime || moved < LURK.chargeSpeed * dt * 0.35) {
+      // a wall stopped it, and that is the shake: it gets the heavy one. Running
+      // out of dash instead is the same event, quieter.
+      const slammed = moved < LURK.chargeSpeed * dt * 0.35;
       e.state = "recover";
       e.recoverT = LURK.recover;
       shake = Math.min(1.5, shake + 0.55);
       spawnBurst(e.x, 0.9, e.z, BOOM.shadeSmoke());
+      gameAudio.sfx("shadeCrash", { x: e.x, z: e.z, vol: slammed ? 1 : 0.5 });
     }
   } else {
     e.recoverT -= dt;

@@ -5,22 +5,18 @@ it is implemented **and** checked by the test layers in `smoke/README.md`.
 
 ## Now
 
-- [x] Simulated soundtrack: a per-level score, sound effects, one mute key.
-- [ ] Lurker: an intimidating roll sound while it charges at you.
-- [ ] Lurker: a crash sound when it slams into a wall (the one that shakes the screen).
-- [ ] Score: a bit more melodic — a recognisable motif per level on top of the pulse.
+- [ ] Chain reactions: a mine going off wounds the monsters around it.
+- [ ] Show the numeric health next to the bar.
 
 ## Next
 
-- [ ] Chain reactions: a mine going off wounds the monsters around it.
-- [ ] Show the numeric health next to the bar.
-- [ ] Music: a short intro/outro sting when a level starts and when the exit is reached.
+- [ ] Music: a short sting when a level starts and when the exit is reached.
+- [ ] More melody still: a counter-line under the motif once the levels get busy.
 - [ ] Refresh `PLAN.md` (it still describes the pre-combat single-maze game) or fold it into this file.
 
 ## Backlog / ideas
 
 - [ ] Separate volume for music and effects (right now one key mutes everything).
-- [ ] A "no sound" default for the very first visit, with the mute key showing the way.
 - [ ] Per-theme music inside a level: the score changes when you enter a themed room.
 
 ## Done
@@ -33,3 +29,7 @@ it is implemented **and** checked by the test layers in `smoke/README.md`.
 - [x] Red diamonds became armed mines: fuse, swell, kill ring, distance falloff.
 - [x] HUD scales with the screen.
 - [x] Sound: synthesised score, effects, positional panning, mute key (`M`).
+- [x] The lurker is loud: an intimidating roll when it charges, a heavy crash
+      when a wall stops it (the shake now has a sound to go with it).
+- [x] The score is more melodic: a motif per level over the chords, and the pads
+      turn into seventh chords once a level gets busy.

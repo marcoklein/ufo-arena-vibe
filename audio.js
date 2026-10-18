@@ -254,9 +254,23 @@ const SFX = {
     tone(rig, t, { type: "sawtooth", f0: 130, dur: 1.2, peak: 0.14, a: 0.09, ...o });
     noiseHit(rig, t, { dur: 1.3, peak: 0.22, lp: 420, sweep: 90, ...o });
   },
-  // the lunge past your ear
+  // the lunge: a rolling mass with a rising growl, and you hear it commit
   shadeCharge(rig, t, o) {
-    noiseHit(rig, t, { dur: 0.4, peak: 0.3, bp: 900, sweep: 3800, q: 0.8, ...o });
+    // the weight of it rolling at you, opening up as it comes
+    noiseHit(rig, t, { dur: 0.78, peak: 0.4, lp: 160, sweep: 1200, q: 1.2, ...o });
+    // something rising underneath: it is not slowing down
+    tone(rig, t, { type: "sawtooth", f0: 44, f1: 98, dur: 0.8, peak: 0.3, a: 0.03, spread: 30, sub: 0.6, ...o });
+    // and metal dragging across stone
+    noiseHit(rig, t, { dur: 0.5, peak: 0.13, bp: 1400, sweep: 3600, q: 2.2, ...o });
+    // a high harmonic on top so it cuts through the score
+    tone(rig, t + 0.05, { type: "square", f0: 620, f1: 1500, dur: 0.6, peak: 0.08, a: 0.12, spread: 40, ...o });
+  },
+  // it meets a wall: the one that shakes the camera
+  shadeCrash(rig, t, o) {
+    tone(rig, t, { type: "sine", f0: 98, f1: 27, dur: 0.55, peak: 0.75, a: 0.002, ...o });
+    noiseHit(rig, t, { dur: 0.42, peak: 0.45, lp: 2800, sweep: 150, ...o });
+    tone(rig, t, { type: "triangle", f0: 190, f1: 118, dur: 0.26, peak: 0.18, spread: 55, ...o });
+    noiseHit(rig, t + 0.03, { dur: 0.32, peak: 0.13, hp: 3200, ...o });
   },
 };
 
@@ -297,6 +311,17 @@ const ARP_FIGURES = [
   [[4, 7], [6, 4], [8, 2], [10, 0], [12, 2], [14, 4]],
 ];
 
+// The tune. One motif per level, in scale degrees over that bar's chord, played
+// an octave up: this is the part you can hum afterwards, and it is what makes a
+// level sound like a piece of music instead of a pulse.
+const MOTIFS = [
+  [[0, 0], [6, 2], [8, 4], [12, 2]],
+  [[0, 4], [3, 2], [6, 0], [10, 2], [14, 4]],
+  [[0, 0], [4, 2], [6, 4], [10, 2], [12, 0]],
+  [[0, 4], [2, 2], [6, 0], [8, 4], [14, 2]],
+  [[0, 0], [3, 4], [6, 2], [8, 4], [12, 7]],
+];
+
 // Everything the score needs to know about a level. Pure: same level in, same
 // music out, which is what makes the offline measurements repeatable.
 function arrangement(level) {
@@ -312,10 +337,12 @@ function arrangement(level) {
     kick: KICK_PATTERNS[Math.min(KICK_PATTERNS.length - 1, Math.floor(stage / 3))],
     bass: BASS_PATTERNS[stage % BASS_PATTERNS.length],
     arp: ARP_FIGURES[stage % ARP_FIGURES.length],
+    motif: MOTIFS[stage % MOTIFS.length],
     layers: {
       pad: true,
       bass: true,
       kick: true,
+      melody: true,
       hat: stage >= 1,
       arp: stage >= 2,
       snare: stage >= 3,
@@ -370,6 +397,10 @@ function mBell(rig, t, f, p) {
 function mLead(rig, t, f, p) {
   tone(rig, t, { type: "sawtooth", f0: f, dur: 0.5, peak: 0.07 * p, a: 0.05, spread: 26, bus: rig.musicBus });
 }
+// the motif voice: soft attack, a touch of detune, sitting above the pad
+function mSing(rig, t, f, dur, p) {
+  tone(rig, t, { type: "triangle", f0: f, dur, peak: 0.13 * p, a: 0.045, spread: 6, bus: rig.musicBus, muffle: 2600 });
+}
 // the shade being awake sits under the whole mix as a sour drone
 function mDread(rig, t, f, dur, p) {
   tone(rig, t, { type: "sawtooth", f0: f, dur, peak: 0.18 * p, a: 0.8, spread: 13, bus: rig.musicBus, muffle: 700 });
@@ -414,10 +445,21 @@ function scheduleStep(rig, step) {
     }
   }
 
+  // the tune: an octave above the pad, on the chord, so it is melodic rather
+  // than just movement. It survives the shade waking up.
+  if (L.melody) {
+    for (const [ms, deg] of arr.motif) {
+      if (ms !== s) continue;
+      mSing(rig, t, degreeNote(arr, chord + deg, 1), arr.stepDur * 2.6, p);
+      rig.notes++;
+    }
+  }
+
   // one long chord per bar, plus the tension layer when the shade is awake
   if (s === 0) {
     if (L.pad) {
-      const notes = [0, 2, 4].map((d) => degreeNote(arr, chord + d));
+      const shape = arr.layers.bells ? [0, 2, 4, 6] : [0, 2, 4]; // a seventh once it is busy
+      const notes = shape.map((d) => degreeNote(arr, chord + d));
       mPad(rig, t, notes, arr.stepDur * 17, p);
       rig.notes += notes.length;
     }

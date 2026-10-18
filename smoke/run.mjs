@@ -415,7 +415,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   up("KeyM");
   ok(a.muted === wasMuted, "and M flips it back");
 
-  /* a shade waking up dresses the score up */
+  /* and the shade is loud in both directions: you hear it commit, you hear it hit */
   down("KeyR");
   up("KeyR");
   frame(2);
@@ -423,9 +423,15 @@ ok(!UFO.stuck, "player starts outside the walls");
   const loudShade = UFO.shades.find((e) => !e.dead);
   if (loudShade) {
     UFO.move(loudShade.x + 18, loudShade.z);
-    for (let i = 0; i < 40 && !a.hunted; i++) frame(1);
-    ok(a.hunted === true, "a waking shade switches the score into hunt mode");
-    ok(a.log.includes("shadeWake"), `and you hear it wake (${[...new Set(a.log)].join(",")})`);
+    for (let i = 0; i < 200 && !a.log.includes("shadeCharge"); i++) frame(1);
+    ok(a.log.includes("shadeCharge"), `the lunge is announced (${[...new Set(a.log)].join(",")})`);
+    // step out of the charge line and let the dash end against something
+    for (let i = 0; i < 200 && !a.log.includes("shadeCrash"); i++) {
+      if (UFO.state !== "playing") break;
+      UFO.move(UFO.pos.x, UFO.pos.z + 6);
+      frame(1);
+    }
+    ok(a.log.includes("shadeCrash"), "and the end of the dash gets a crash to match the shake");
   }
   down("KeyR");
   up("KeyR");

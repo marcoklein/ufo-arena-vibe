@@ -101,10 +101,10 @@ const SPEC = `(async () => {
   const A = window.GAME_AUDIO;
   const measure = window.MEASURE;
   const names = ["shoot", "hit", "kill", "killShade", "enemyShot", "boom", "mineArm",
-    "mineBeep", "hurt", "death", "exit", "levelUp", "rift", "shadeWake", "shadeCharge"];
+    "mineBeep", "hurt", "death", "exit", "levelUp", "rift", "shadeWake", "shadeCharge", "shadeCrash"];
   const t0 = performance.now();
 
-  const fx = await measure({ seconds: 23, level: 1, music: false, sfx: names, spacing: 1.4 });
+  const fx = await measure({ seconds: 26, level: 1, music: false, sfx: names, spacing: 1.4 });
   const sfx = Object.fromEntries(Object.entries(fx.windows).map(([k, v]) => [k, { rms: v.rms, peak: v.peak }]));
 
   const scoreAt = async (level, hunted) => {
@@ -113,6 +113,7 @@ const SPEC = `(async () => {
       rms: m.overall.rms, low: m.overall.low, high: m.overall.high,
       peak: m.overall.peak, notes: m.notes, steps: m.steps,
       bpm: m.arr.bpm, mode: m.arr.mode, root: +m.arr.root.toFixed(1),
+      motif: m.arr.motif.map(([step, deg]) => step + ":" + deg).join(" "),
       layers: Object.entries(m.arr.layers).filter(([, v]) => v).map(([k]) => k).join("+"),
     };
   };
@@ -232,6 +233,10 @@ for (const [name, v] of Object.entries(data.sfx)) {
   ok(v.peak > 0.04 && v.rms > 0.0005, `${name.padEnd(12)} peak ${v.peak.toFixed(3)}  rms ${v.rms.toFixed(4)}`);
 }
 
+console.log("\nthe lurker carries weight:");
+ok(data.sfx.shadeCharge.peak > 0.3, `the lunge rolls in loud (peak ${data.sfx.shadeCharge.peak})`);
+ok(data.sfx.shadeCrash.peak > 0.3, `and the crash lands as hard as a mine going off (peak ${data.sfx.shadeCrash.peak} vs boom ${data.sfx.boom.peak})`);
+
 console.log("\nthe score, and it changes per level:");
 const s = data.score;
 ok(s.l1.rms > 0.005, `level 1 renders sound (rms ${s.l1.rms}, peak ${s.l1.peak})`);
@@ -239,11 +244,12 @@ ok(s.l1.notes > 20, `and schedules notes over 8s (${s.l1.notes} notes, ${s.l1.st
 ok(s.l1.bpm !== s.l5.bpm || s.l1.root !== s.l5.root, `level 5 is a different piece (${s.l1.bpm}bpm/${s.l1.mode} vs ${s.l5.bpm}bpm/${s.l5.mode})`);
 ok(s.l9.bpm > s.l1.bpm, `and level 9 drives harder (${s.l1.bpm} -> ${s.l9.bpm} bpm)`);
 ok(s.l1.layers !== s.l9.layers, `with more going on (${s.l1.layers} -> ${s.l9.layers})`);
+ok(s.l1.motif !== s.l5.motif && s.l5.motif !== s.l9.motif && s.l1.motif !== s.l9.motif, `each level gets its own tune (${s.l1.motif} / ${s.l5.motif} / ${s.l9.motif})`);
 ok(s.l9hunted.notes !== s.l9.notes, `the shade swaps layers rather than adding them (${s.l9.notes} -> ${s.l9hunted.notes} notes)`);
 ok(s.l9hunted.low > s.l9.low * 1.02, `a deep drone comes in under it (low ${s.l9.low} -> ${s.l9hunted.low})`);
 ok(s.l9hunted.rms > s.l9.rms * 1.02, `and the mix measurably changes (rms ${s.l9.rms} -> ${s.l9hunted.rms})`);
 for (const [k, v] of Object.entries(s)) {
-  console.log(`  info: ${k.padEnd(9)} ${v.bpm}bpm ${v.mode.padEnd(8)} root ${v.root}Hz  layers ${v.layers}  rms ${v.rms} (low ${v.low} high ${v.high})  notes ${v.notes}`);
+  console.log(`  info: ${k.padEnd(9)} ${v.bpm}bpm ${v.mode.padEnd(8)} root ${v.root}Hz  rms ${v.rms} (low ${v.low} high ${v.high})  notes ${v.notes}\n        layers ${v.layers}\n        motif  ${v.motif}`);
 }
 
 console.log("\nplacement:");
