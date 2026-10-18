@@ -16,6 +16,11 @@ const size = process.argv[4] || "960,600";
 
 const url = `http://127.0.0.1:8000/smoke/browser.html?data=1${extra}`;
 
+// a `settle=N` shot has to survive N frames of virtual time before it can read
+// the canvas back, so the budget has to grow with it
+const settle = Number((extra.match(/settle=(\d+)/) || [])[1] || 0);
+const budget = 9000 + Math.round(settle * 17);
+
 const dom = execFileSync(
   CHROME,
   [
@@ -26,7 +31,7 @@ const dom = execFileSync(
     "--incognito",
     "--disk-cache-size=1",
     `--window-size=${size}`,
-    "--virtual-time-budget=9000",
+    `--virtual-time-budget=${budget}`,
     "--dump-dom",
     url,
   ],

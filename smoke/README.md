@@ -23,8 +23,9 @@ node test.mjs
 
 Boots the **real** `main.js` against a stubbed three.js (`three-mock.js`, wired
 up by `loader.mjs`) and a fake DOM, then drives the actual game loop with
-scripted input: drives, turns, shoots, kills a monster, takes contact damage,
-reaches the exit, advances a level, dies and restarts.
+scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
+blast, walks out of one and does not, reaches the exit, advances a level, dies and
+restarts.
 
 ```
 node --import ./smoke/loader.mjs smoke/run.mjs
@@ -35,6 +36,7 @@ node --import ./smoke/loader.mjs smoke/run.mjs
 Loads the real markup, styles and three.js from `../index.html`, renders real
 WebGL frames, and reports the result in a `<pre id="probe">`. Needs the dev
 server running and Chrome; see `smoke/shot.mjs` for the invocation.
+
 ## 4. Screenshots — `smoke/shot.mjs`
 
 Headless `--screenshot` cannot composite WebGL, so this renders a frame, reads
@@ -48,16 +50,20 @@ node smoke/shot.mjs smoke/out/exit.png  "&pose=exit"     # the exit beacon
 node smoke/shot.mjs smoke/out/prop.png  "&pose=prop"     # a themed room's wall props
 node smoke/shot.mjs smoke/out/shade.png "&pose=shade"    # a shade closing in
 node smoke/shot.mjs smoke/out/rift.png  "&pose=rift"     # a monster spawn point
+node smoke/shot.mjs smoke/out/mine.png  "&pose=mine"     # a red diamond, spiked and blinking
+node smoke/shot.mjs smoke/out/fuse.png  "&pose=fuse"     # caught in one when it arms
+node smoke/shot.mjs smoke/out/blast.png "&pose=blast"    # ...and the moment it goes off
 node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"   # freeze mid-fireball
 node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going up
 ```
 
 Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
-(a shade awake and hunting), `rift`. Extras: `&boom=enemy|player` (detonate and
-freeze mid-blast), `&range=N` (how far away the kill happens), `&keys=1` (report
-the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a shade),
-`&ram=1` (run a red diamond into the hull and report what it cost), `&settle=N`
-(let the level run by itself for N frames before the probe reads it).
+(a shade awake and hunting), `rift`, `mine`, `fuse` (mid-fuse, kill ring out),
+`blast` (the instant after a mine goes off). Extras: `&boom=enemy|player`
+(detonate and freeze mid-blast), `&range=N` (how far away the kill happens),
+`&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
+shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
+`&settle=N` (let the level run by itself for N frames before the probe reads it).
 
 ## 5. Trusted key events — `smoke/cdp.mjs`
 
@@ -96,6 +102,7 @@ visible, start green, exit gold. Needs the dev server.
 UFO.level, UFO.hp, UFO.kills, UFO.monsters, UFO.state
 UFO.enemies, UFO.bullets, UFO.pos, UFO.exit, UFO.yaw
 UFO.rooms, UFO.props, UFO.stats, UFO.explosions, UFO.particles
-UFO.shades, UFO.hunted, UFO.rifts, UFO.riftsOpened, UFO.gore, UFO.splats, UFO.keys
+UFO.shades, UFO.hunted, UFO.rifts, UFO.riftsOpened, UFO.debris, UFO.splats, UFO.keys
+UFO.mine, UFO.blastAt(d)
 UFO.move(x, z), UFO.aim(x, z), UFO.damage(n), UFO.kill(), UFO.killPlayer(), UFO.stuckAt(x, z)
 ```

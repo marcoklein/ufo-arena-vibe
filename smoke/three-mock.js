@@ -33,7 +33,9 @@ class Obj3D {
     this.parent = null;
     this.position = new Vec();
     this.rotation = new Euler();
+    this.quaternion = new Quaternion();
     this.scale = new Scale();
+    this.matrix = new Matrix4();
     this.visible = true;
   }
   add(...objs) {
@@ -52,6 +54,7 @@ class Obj3D {
 }
 
 export class Group extends Obj3D {}
+export class Object3D extends Obj3D {}
 export class Scene extends Obj3D {
   constructor() { super(); this.background = null; this.fog = null; }
 }
@@ -153,7 +156,9 @@ export class Matrix4 {
 }
 export class Quaternion {
   identity() { return this; }
+  copy() { return this; }
   setFromAxisAngle() { return this; }
+  setFromUnitVectors() { return this; }
 }
 export class Clock {
   constructor() { this.t = 0; }

@@ -83,6 +83,7 @@
           const z = tz + dz * dist;
           if (UFO.stuckAt(x, z)) continue;
           if (UFO.stuckAt(tx + dx * dist * 0.55, tz + dz * dist * 0.55)) continue; // wall in the way
+          if (UFO.stuckAt(x + dx * 9.5, z + dz * 9.5)) continue;                   // chase camera needs room behind us
           return { x, z };
         }
         return null;
@@ -93,6 +94,35 @@
         UFO.move(t.x + 7, t.z + 7);
         UFO.aim(t.x, t.z);
         await frames(30);
+      } else if (pose === "mine") {
+        // an armed-adjacent look at one mine from outside its arming range
+        const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+        if (m) {
+          const v = vantage(m.x, m.z, 7);
+          if (v) { UFO.move(v.x, v.z); UFO.aim(m.x, m.z); }
+        }
+        await frames(30);
+      } else if (pose === "fuse") {
+        // right up against it, partway through the fuse: swell + kill ring
+        const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+        if (m) {
+          const v = vantage(m.x, m.z, 2.2) || { x: m.x + 2, z: m.z };
+          UFO.move(v.x, v.z);
+          UFO.aim(m.x, m.z);
+          for (let i = 0; i < 60 && !m.armed; i++) await frames(1);
+          await frames(Math.round(UFO.mine.fuse * 60 * 0.55));
+        }
+      } else if (pose === "blast") {
+        // and then: the moment it goes off
+        const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+        if (m) {
+          const v = vantage(m.x, m.z, 2.2) || { x: m.x + 2, z: m.z };
+          UFO.move(v.x, v.z);
+          UFO.aim(m.x, m.z);
+          for (let i = 0; i < 60 && !m.armed; i++) await frames(1);
+          for (let i = 0; i < 200 && !m.dead; i++) await frames(1);
+          await frames(3);
+        }
       } else if (pose === "exit") {
         const w = UFO.worldOf(UFO.exit.col, UFO.exit.row);
         UFO.move(w.x - 6, w.z + 6);
@@ -172,7 +202,8 @@
       } else if (boom === "enemy") {
         const range = Number(new URLSearchParams(location.search).get("range") || 6);
         const t = UFO.enemies.find((e) => !e.dead);
-        UFO.move(t.x + range * 0.7, t.z + range * 0.7);
+        const v = vantage(t.x, t.z, range) || { x: t.x + range * 0.7, z: t.z + range * 0.7 };
+        UFO.move(v.x, v.z);
         UFO.aim(t.x, t.z);
         await frames(20);
         UFO.kill();
@@ -206,17 +237,22 @@
         }
       }
 
-      // ?ram=1 — run into a red diamond and report what it costs
-      const ram = {};
-      if (new URLSearchParams(location.search).has("ram")) {
-        const t = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
-        if (t) {
-          ram.hpBefore = UFO.hp;
-          UFO.move(t.x + 1, t.z);
-          await frames(12);
-          ram.hpAfter = UFO.hp;
-          ram.diamondGone = t.dead;
-          ram.kills = UFO.kills;
+      // ?mine=1 — arm a red diamond, back out of the ring, and report the blast
+      const mine = {};
+      if (new URLSearchParams(location.search).has("mine")) {
+        const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+        if (m) {
+          mine.hpBefore = UFO.hp;
+          UFO.move(m.x + 1, m.z);
+          for (let i = 0; i < 30 && !m.armed; i++) await frames(1);
+          mine.armed = m.armed;
+          mine.fuse = +m.fuse.toFixed(2);
+          mine.hpArmed = UFO.hp;
+          mine.ringVisible = m.mine.ring.visible;
+          for (let i = 0; i < 200 && !m.dead; i++) await frames(1);
+          mine.dead = m.dead;
+          mine.hpAfterBlast = UFO.hp;
+          mine.debris = UFO.debris.length;
         }
       }
 
@@ -248,7 +284,7 @@
           riftsOpened: UFO.riftsOpened,
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
-          ram,
+          mine,
         });
         document.body.appendChild(pre);
       }

@@ -24,7 +24,17 @@ const NOSE = 1.5;        // muzzle offset from the craft centre
 
 const ENEMY_R = 1.05;
 const TOUCH_DMG = 12;      // a spitter brushing past you
-const RAM_DMG = PLAYER_HP * 0.2; // a red diamond going off on the hull: a fifth of the bar
+
+/* the red diamonds are floating mines. They latch on when they reach you, then
+   swell up and blink for a moment before going off, so there is a window to back
+   away. Point blank costs a fifth of the bar; the price falls off with distance,
+   and outside blastR it costs nothing at all. */
+const MINE = {
+  fuse: 1.4,             // seconds of "get out of here" once it has latched on
+  fullR: 2.6,            // inside this you eat the whole fifth
+  blastR: 7.5,           // outside this you eat nothing
+  dmg: PLAYER_HP * 0.2,
+};
 
 /* the shade: a corner-crawler that ends the run the moment it touches you */
 const LURK = {
@@ -725,11 +735,9 @@ scene.add(enemyGroup);
 const enemyBodyGeo = new THREE.IcosahedronGeometry(1, 0);
 const enemyEyeGeo = new THREE.SphereGeometry(0.22, 10, 8);
 const enemyBodyMat = {
-  grunt: new THREE.MeshStandardMaterial({ color: 0xe04a4a, roughness: 0.55, metalness: 0.2, emissive: 0xd42a2a, emissiveIntensity: 0.3 }),
   spitter: new THREE.MeshStandardMaterial({ color: 0x8a53f0, roughness: 0.55, metalness: 0.2, emissive: 0x6a2fe0, emissiveIntensity: 0.3 }),
 };
 const enemyEyeMat = {
-  grunt: new THREE.MeshStandardMaterial({ color: 0xffdcdc, emissive: 0xff8080, emissiveIntensity: 2 }),
   spitter: new THREE.MeshStandardMaterial({ color: 0xe8dcff, emissive: 0xb892ff, emissiveIntensity: 2 }),
 };
 const ENEMY_SPEC = {
@@ -737,29 +745,133 @@ const ENEMY_SPEC = {
   spitter: { hp: 3, speed: 3.8 },
 };
 
+/* ------------------------------------------------------------ the mine */
+// A red diamond is a floating mine: a riveted hull, ten horns, a running light,
+// and a ring on the floor that paints exactly how far the blast reaches.
+const mineHullGeo = new THREE.IcosahedronGeometry(0.62, 0);
+const mineHornGeo = new THREE.ConeGeometry(0.15, 0.62, 5);
+const mineLampGeo = new THREE.SphereGeometry(0.2, 10, 8);
+const mineRingGeo = new THREE.RingGeometry(0.86, 1, 44);
+const mineDomeGeo = new THREE.RingGeometry(0, 1, 40);
+const mineHullMat = new THREE.MeshStandardMaterial({
+  color: 0x8f2418, roughness: 0.5, metalness: 0.55, emissive: 0xd42a2a, emissiveIntensity: 0.22,
+});
+const mineHornMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2f3a, roughness: 0.45, metalness: 0.7, emissive: 0x5a1208, emissiveIntensity: 0.3,
+});
+const mineLampMat = new THREE.MeshStandardMaterial({
+  color: 0xffe0d0, emissive: 0xff4a2a, emissiveIntensity: 1.2,
+});
+const mineRingMat = new THREE.MeshBasicMaterial({
+  color: 0xff5a2a, transparent: true, opacity: 0.5,
+  blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+});
+const mineDomeMat = new THREE.MeshBasicMaterial({
+  color: 0xff3010, transparent: true, opacity: 0.08,
+  blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+});
+
+// ten horns: four around the equator, four raked up, two hanging down
+const MINE_HORN_WAYS = [
+  [0, 0], [Math.PI / 2, 0], [Math.PI, 0], [-Math.PI / 2, 0],
+  [Math.PI / 4, 0.5], [(3 * Math.PI) / 4, 0.5], [-(3 * Math.PI) / 4, 0.5], [-Math.PI / 4, 0.5],
+  [0, -0.55], [Math.PI, -0.55],
+];
+const MINE_HORNS = MINE_HORN_WAYS.map(([az, el]) => {
+  const dir = new THREE.Vector3(
+    Math.cos(el) * Math.sin(az),
+    Math.sin(el),
+    Math.cos(el) * Math.cos(az)
+  );
+  return { dir, quat: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir) };
+});
+
+// one instanced mesh per mine: ten horns for a single draw call
+const hornDummy = new THREE.Object3D();
+function placeMineHorns(inst, swell) {
+  for (let i = 0; i < MINE_HORNS.length; i++) {
+    const h = MINE_HORNS[i];
+    hornDummy.position.copy(h.dir).multiplyScalar(0.6 * swell);
+    hornDummy.quaternion.copy(h.quat);
+    hornDummy.scale.setScalar(swell);
+    hornDummy.updateMatrix();
+    inst.setMatrixAt(i, hornDummy.matrix);
+  }
+  inst.instanceMatrix.needsUpdate = true;
+}
+
+function buildMine(x, z) {
+  const group = new THREE.Group();
+  const hull = new THREE.Group(); // everything that swells when it arms
+  group.add(hull);
+
+  const body = new THREE.Mesh(mineHullGeo, mineHullMat);
+  hull.add(body);
+
+  const horns = new THREE.InstancedMesh(mineHornGeo, mineHornMat, MINE_HORNS.length);
+  placeMineHorns(horns, 1);
+  hull.add(horns);
+
+  // its own light, so this one can blink on its own schedule
+  const lampMat = mineLampMat.clone();
+  const lamp = new THREE.Mesh(mineLampGeo, lampMat);
+  lamp.position.set(0, 0, -0.34);
+  hull.add(lamp);
+
+  // the kill zone, flat on the floor: hidden until it arms
+  const ringMat = mineRingMat.clone();
+  const ring = new THREE.Mesh(mineRingGeo, ringMat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.scale.setScalar(MINE.blastR);
+  ring.visible = false;
+  group.add(ring);
+
+  const domeMat = mineDomeMat.clone();
+  const dome = new THREE.Mesh(mineDomeGeo, domeMat);
+  dome.rotation.x = -Math.PI / 2;
+  dome.scale.setScalar(MINE.blastR);
+  dome.visible = false;
+  group.add(dome);
+
+  group.position.set(x, 1.1, z);
+  return { group, hull, body, horns, lamp, ring, dome, lampMat, ringMat, domeMat };
+}
+
 let enemies = [];
 
 function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0 } = {}) {
   if (type === "lurker") return spawnShade(x, z, power);
   const spec = ENEMY_SPEC[type];
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(enemyBodyGeo, enemyBodyMat[type]);
-  group.add(body);
-  const eye = new THREE.Mesh(enemyEyeGeo, enemyEyeMat[type]);
-  eye.position.set(0, 0.1, -0.6);
-  group.add(eye);
-  group.position.set(x, 1.1, z);
+  const mine = type === "grunt" ? buildMine(x, z) : null;
+  let group, body, eye;
+  if (mine) {
+    ({ group, body } = mine);
+    eye = mine.lamp;
+  } else {
+    group = new THREE.Group();
+    body = new THREE.Mesh(enemyBodyGeo, enemyBodyMat[type]);
+    group.add(body);
+    eye = new THREE.Mesh(enemyEyeGeo, enemyEyeMat[type]);
+    eye.position.set(0, 0.1, -0.6);
+    group.add(eye);
+    group.position.set(x, 1.1, z);
+  }
   enemyGroup.add(group);
 
   const hp = spec.hp + Math.floor(power / 3) + hpBonus;
   return {
-    type, group, body, eye,
+    type, group, body, eye, mine,
     x, z, hp, maxHp: hp, r: ENEMY_R,
     speed: spec.speed * (1 + power * 0.05),
     fireT: 1 + decor(),
     fireRate: Math.max(0.7, 2.4 - power * 0.13),
     hitT: 0,
     dead: false,
+    // mines only:  armed => the fuse is burning, and it is about to go off
+    armed: false,
+    fuse: 0,
+    phase: fxRng() * Math.PI * 2,
+    t: fxRng() * 6,
     // Guards hold a post (and are the reason the exit is still defended);
     // roamers come looking for you but give up and drift home again.
     guard,
@@ -1006,8 +1118,19 @@ const BOOM = {
     life: 0.75, gravity: 7, drag: 2.6, spread: 0.9,
     shell: 1.9, shock: 4.4, glow: 7.5, flash: 300,
   }),
-  // wet spray behind flying chunks
-  blood: (color = 0x8d1230, hot = 0xff6a8a) => ({
+  // a mine latching on: a hard clunk and a shower of sparks
+  arm: () => ({
+    color: 0xffb066, hot: 0xffffff, count: 24, speed: 13, size: 0.5,
+    life: 0.45, gravity: 7, drag: 4, spread: 0.6, glow: 4, flash: 220,
+  }),
+  // and then the mine itself: a flat orange fireball as wide as its kill zone
+  mine: () => ({
+    color: 0xff7a2a, hot: 0xfff0c8, count: 78, speed: 27, size: 1.15,
+    life: 1.1, gravity: 9, drag: 2.1, spread: 1.3,
+    shell: 3.2, shock: MINE.blastR, glow: 13, flash: 620,
+  }),
+  // the dust and grit thrown up behind flying wreckage
+  grit: (color = 0x2b1a12, hot = 0xffa860) => ({
     color, hot, count: 26, speed: 12, size: 0.7,
     life: 0.7, gravity: 13, drag: 3.4, spread: 0.9, blending: "normal",
   }),
@@ -1112,26 +1235,16 @@ function clearExplosions() {
   for (const f of fxLights) { f.light.intensity = 0; f.t = f.max; }
 }
 
-/* ------------------------------------------------------------------ gore */
-// Chunks of whatever lives inside these things. They arc out, bounce, come to
-// rest, and leave a stain that fades much later.
-const goreGroup = new THREE.Group();
-scene.add(goreGroup);
+/* ---------------------------------------------------------------- debris */
+// What is left of a thing that just came apart: shards, slivers and embers that
+// arc out, bounce, settle on the floor, and leave a scorch that fades much
+// later. Not meat: wreckage.
+const debrisGroup = new THREE.Group();
+scene.add(debrisGroup);
 
-const goreChunkGeo = new THREE.IcosahedronGeometry(0.3, 0);
-const goreLoopGeo = new THREE.TorusGeometry(0.36, 0.14, 6, 12);
-const goreMats = [
-  new THREE.MeshStandardMaterial({ color: 0x8d1230, roughness: 0.42, metalness: 0.02, emissive: 0x4c0718, emissiveIntensity: 0.5 }),
-  new THREE.MeshStandardMaterial({ color: 0x5e0a20, roughness: 0.52, metalness: 0.02, emissive: 0x2c0310, emissiveIntensity: 0.45 }),
-  new THREE.MeshStandardMaterial({ color: 0xb0203f, roughness: 0.36, metalness: 0.02, emissive: 0x6b0d24, emissiveIntensity: 0.55 }),
-];
-const goreLoopMat = new THREE.MeshStandardMaterial({ color: 0x7d0f2a, roughness: 0.45, metalness: 0.05, emissive: 0x420615, emissiveIntensity: 0.5 });
-// what a saucer is full of instead
-const ichorMats = [
-  new THREE.MeshStandardMaterial({ color: 0x2ea8c8, roughness: 0.32, metalness: 0.35, emissive: 0x27d8ff, emissiveIntensity: 0.85 }),
-  new THREE.MeshStandardMaterial({ color: 0x9ad8e8, roughness: 0.28, metalness: 0.45, emissive: 0x6ce9ff, emissiveIntensity: 0.95 }),
-];
-const ichorLoopMat = new THREE.MeshStandardMaterial({ color: 0x1d7fa0, roughness: 0.3, metalness: 0.4, emissive: 0x27d8ff, emissiveIntensity: 0.8 });
+const debrisShardGeo = new THREE.IcosahedronGeometry(0.2, 0);
+const debrisSliverGeo = new THREE.BoxGeometry(0.11, 0.11, 0.5);
+const debrisPlateGeo = new THREE.BoxGeometry(0.32, 0.06, 0.24);
 
 function splatTexture() {
   const s = 128;
@@ -1152,42 +1265,71 @@ function splatTexture() {
 
 const splatGeo = new THREE.RingGeometry(0.16, 1, 18);
 const splatTex = splatTexture();
-const splatMats = [
-  new THREE.MeshBasicMaterial({ map: splatTex, color: 0x6d0b22, transparent: true, opacity: 0.85, depthWrite: false }),
-  new THREE.MeshBasicMaterial({ map: splatTex, color: 0x46061a, transparent: true, opacity: 0.8, depthWrite: false }),
-  new THREE.MeshBasicMaterial({ map: splatTex, color: 0x3d1a5e, transparent: true, opacity: 0.8, depthWrite: false }),
-  new THREE.MeshBasicMaterial({ map: splatTex, color: 0x1c6d86, transparent: true, opacity: 0.75, depthWrite: false }),
-];
 
-let gore = [];
+// One palette per thing that comes apart. Three materials each, so a hundred
+// pieces of wreckage are still three materials.
+function debrisPalette({ dark, mid, hot, ember, grit, gritHot, scorch, scorchDim }) {
+  return {
+    mats: [
+      new THREE.MeshStandardMaterial({ color: dark, roughness: 0.72, metalness: 0.45, emissive: ember, emissiveIntensity: 0.3 }),
+      new THREE.MeshStandardMaterial({ color: mid, roughness: 0.5, metalness: 0.5, emissive: ember, emissiveIntensity: 0.75 }),
+      new THREE.MeshStandardMaterial({ color: hot, roughness: 0.32, metalness: 0.25, emissive: ember, emissiveIntensity: 1.6 }),
+    ],
+    grit, gritHot,
+    scorch: [
+      new THREE.MeshBasicMaterial({ map: splatTex, color: scorch, transparent: true, opacity: 0.78, depthWrite: false }),
+      new THREE.MeshBasicMaterial({ map: splatTex, color: scorchDim, transparent: true, opacity: 0.7, depthWrite: false }),
+    ],
+  };
+}
+
+const DEBRIS = {
+  // a mine going off: scorched steel and embers
+  blast: debrisPalette({
+    dark: 0x2b1a12, mid: 0x8a3d16, hot: 0xffa855, ember: 0xff6a1a,
+    grit: 0x2b1a12, gritHot: 0xffa860, scorch: 0x3a1c0c, scorchDim: 0x1d0d07,
+  }),
+  spitter: debrisPalette({
+    dark: 0x1d1636, mid: 0x5b34a8, hot: 0xc79bff, ember: 0x8b4bff,
+    grit: 0x1a1030, gritHot: 0xb892ff, scorch: 0x2a1c4a, scorchDim: 0x140c26,
+  }),
+  shade: debrisPalette({
+    dark: 0x110a20, mid: 0x3d1a63, hot: 0x9a5cff, ember: 0x6a2ad6,
+    grit: 0x120826, gritHot: 0x9a5cff, scorch: 0x1e0f3a, scorchDim: 0x0e0619,
+  }),
+  player: debrisPalette({
+    dark: 0x143038, mid: 0x2f8fa8, hot: 0x9be9ff, ember: 0x27d8ff,
+    grit: 0x102428, gritHot: 0x6ce9ff, scorch: 0x14404d, scorchDim: 0x0a2028,
+  }),
+};
+
+let debris = [];
 const splats = [];
 
-function addSplat(x, z, ichor) {
-  const mesh = new THREE.Mesh(splatGeo, splatMats[ichor ? 3 : Math.floor(fxRng() * 3)]);
+function addSplat(x, z, palette) {
+  const pal = DEBRIS[palette] || DEBRIS.blast;
+  const mesh = new THREE.Mesh(splatGeo, pal.scorch[fxRng() < 0.5 ? 0 : 1]);
   mesh.rotation.x = -Math.PI / 2;
   mesh.rotation.z = fxRng() * Math.PI * 2;
   mesh.scale.setScalar(0.85 + fxRng() * 1.7);
   mesh.position.set(x, 0.022 + splats.length * 0.0005, z);
-  goreGroup.add(mesh);
+  debrisGroup.add(mesh);
   splats.push({ mesh, t: 0, life: 22 + fxRng() * 12 });
   if (splats.length > 54) {
     const old = splats.shift();
-    goreGroup.remove(old.mesh);
+    debrisGroup.remove(old.mesh);
   }
 }
 
-function spawnGore(x, y, z, {
-  count = 14, speed = 14, lift = 11, spread = 0.8, life = 11,
-  loops = 2, ichor = false, blood = 0x8d1230, bloodHot = 0xff6a8a,
+function spawnDebris(x, y, z, {
+  palette = "blast", count = 12, speed = 14, lift = 11, spread = 0.8, life = 11,
 } = {}) {
-  const mats = ichor ? ichorMats : goreMats;
+  const pal = DEBRIS[palette] || DEBRIS.blast;
   for (let i = 0; i < count; i++) {
-    const isLoop = i < loops;
-    // a saucer is full of coolant *and* something organic
-    const useIchor = ichor && fxRng() < 0.45;
+    const pick = fxRng();
     const mesh = new THREE.Mesh(
-      isLoop ? goreLoopGeo : goreChunkGeo,
-      useIchor ? ichorLoopMat : isLoop ? goreLoopMat : (useIchor ? ichorMats : mats)[i % (useIchor ? ichorMats.length : mats.length)]
+      pick < 0.4 ? debrisSliverGeo : pick < 0.65 ? debrisPlateGeo : debrisShardGeo,
+      pal.mats[fxRng() < 0.4 ? 2 : fxRng() < 0.6 ? 1 : 0]
     );
     const th = fxRng() * Math.PI * 2;
     const sp = speed * (0.35 + fxRng() * 0.95);
@@ -1195,9 +1337,9 @@ function spawnGore(x, y, z, {
     const sy = 0.5 + fxRng() * 0.7;
     const sz = 0.5 + fxRng() * 0.95;
     mesh.scale.set(sx, sy, sz);
-    goreGroup.add(mesh);
-    gore.push({
-      mesh, sx, sy, sz, ichor,
+    debrisGroup.add(mesh);
+    debris.push({
+      mesh, sx, sy, sz, palette,
       x: x + (fxRng() - 0.5) * spread,
       y: y + (fxRng() - 0.5) * spread,
       z: z + (fxRng() - 0.5) * spread,
@@ -1208,23 +1350,23 @@ function spawnGore(x, y, z, {
       t: 0,
       life: life * (0.65 + fxRng() * 0.7),
       rest: false,
-      bled: false,
+      settled: false,
     });
   }
-  spawnBurst(x, y, z, BOOM.blood(blood, bloodHot));
-  while (gore.length > 120) {
-    const old = gore.shift();
-    goreGroup.remove(old.mesh);
+  spawnBurst(x, y, z, BOOM.grit(pal.grit, pal.gritHot));
+  while (debris.length > 120) {
+    const old = debris.shift();
+    debrisGroup.remove(old.mesh);
   }
 }
 
-function updateGore(dt) {
-  for (let i = gore.length - 1; i >= 0; i--) {
-    const g = gore[i];
+function updateDebris(dt) {
+  for (let i = debris.length - 1; i >= 0; i--) {
+    const g = debris[i];
     g.t += dt;
     if (g.t >= g.life) {
-      goreGroup.remove(g.mesh);
-      gore.splice(i, 1);
+      debrisGroup.remove(g.mesh);
+      debris.splice(i, 1);
       continue;
     }
     if (!g.rest) {
@@ -1245,9 +1387,9 @@ function updateGore(dt) {
         g.spin[0] *= 0.4;
         g.spin[1] *= 0.4;
         g.spin[2] *= 0.4;
-        if (!g.bled) {
-          g.bled = true;
-          addSplat(g.x, g.z, g.ichor);
+        if (!g.settled) {
+          g.settled = true;
+          addSplat(g.x, g.z, g.palette);
         }
         if (Math.abs(g.vy) < 1.6) {
           g.vy = 0;
@@ -1265,16 +1407,16 @@ function updateGore(dt) {
     const s = splats[i];
     s.t += dt;
     if (s.t >= s.life) {
-      goreGroup.remove(s.mesh);
+      debrisGroup.remove(s.mesh);
       splats.splice(i, 1);
     }
   }
 }
 
-function clearGore() {
-  for (const g of gore) goreGroup.remove(g.mesh);
-  gore = [];
-  for (const s of splats) goreGroup.remove(s.mesh);
+function clearDebris() {
+  for (const g of debris) debrisGroup.remove(g.mesh);
+  debris = [];
+  for (const s of splats) debrisGroup.remove(s.mesh);
   splats.length = 0;
 }
 
@@ -1806,7 +1948,7 @@ function startLevel(n) {
   buildWorld(level);
   clearEntities();
   clearExplosions();
-  clearGore();
+  clearDebris();
   clearRifts();
   ufo.visible = true;
 
@@ -1889,10 +2031,9 @@ function killPlayer() {
   hp = 0;
   state = "dead";
   blowUpPlayer();
-  // what was in the saucer comes out too
-  spawnGore(pos.x, HOVER, pos.z, {
-    count: 22, speed: 18, lift: 13, spread: 1.2, life: 13, loops: 4,
-    ichor: true, blood: 0x1f8fae, bloodHot: 0xbdfaff,
+  // and it comes apart: hull plates, glowing coolant, embers
+  spawnDebris(pos.x, HOVER, pos.z, {
+    palette: "player", count: 24, speed: 18, lift: 13, spread: 1.2, life: 13,
   });
   shake = 1.7;
   hurtFlash = 1;
@@ -1903,8 +2044,8 @@ function killPlayer() {
   });
 }
 
-// `pierce` ignores the invulnerability window: a kamikaze hit always lands, so
-// ramming is never a free kill for the player.
+// `pierce` ignores the invulnerability window: a blast always lands, so being
+// caught next to a mine is never a free walk-away.
 function hurtPlayer(dmg, { pierce = false } = {}) {
   if (state !== "playing" || (hurtT > 0 && !pierce)) return;
   hp -= dmg;
@@ -1914,37 +2055,111 @@ function hurtPlayer(dmg, { pierce = false } = {}) {
   if (hp <= 0) killPlayer();
 }
 
-function killEnemy(e, { credit = true } = {}) {
+function killEnemy(e, { credit = true, quiet = false } = {}) {
   if (e.dead) return;
   e.dead = true;
   enemyGroup.remove(e.group);
   if (credit) GAME.kills++;
-  if (e.type === "lurker") {
-    spawnBurst(e.x, 1.2, e.z, BOOM.shade());
-    spawnGore(e.x, 1.2, e.z, {
-      count: 16, speed: 15, lift: 11, spread: 1, life: 11, loops: 3,
-      blood: 0x5a2a9e, bloodHot: 0xd6b0ff,
-    });
-  } else {
-    spawnBurst(e.x, 1.1, e.z, BOOM.enemy(e.type));
-    spawnGore(e.x, 1.1, e.z, {
-      count: 8, speed: 12, lift: 9, spread: 0.7, life: 8, loops: 1,
-      blood: e.type === "spitter" ? 0x6a2ad6 : 0x8d1230,
-      bloodHot: e.type === "spitter" ? 0xd6b0ff : 0xff6a8a,
-    });
+  if (!quiet) {
+    if (e.type === "lurker") {
+      spawnBurst(e.x, 1.2, e.z, BOOM.shade());
+      spawnDebris(e.x, 1.2, e.z, { palette: "shade", count: 16, speed: 15, lift: 11, spread: 1, life: 11 });
+    } else if (e.type === "grunt") {
+      spawnBurst(e.x, 1.1, e.z, BOOM.enemy(e.type));
+      spawnDebris(e.x, 1.1, e.z, { palette: "blast", count: 10, speed: 13, lift: 10, spread: 0.8, life: 9 });
+    } else {
+      spawnBurst(e.x, 1.1, e.z, BOOM.enemy(e.type));
+      spawnDebris(e.x, 1.1, e.z, { palette: "spitter", count: 8, speed: 12, lift: 9, spread: 0.7, life: 8 });
+    }
   }
   const d = Math.hypot(pos.x - e.x, pos.z - e.z);
   if (d < 14) shake = Math.min(1.2, shake + 0.22 * (1 - d / 14));
 }
 
-// A red diamond does not claw at the hull, it detonates against it: it dies in
-// its own fireball and takes a fifth of your health with it. Not a one-shot,
-// but three of them in the open is a very short run.
-function ramPlayer(e) {
-  if (state !== "playing") return;
-  killEnemy(e, { credit: false });
-  shake = Math.min(1.5, shake + 0.45);
-  hurtPlayer(RAM_DMG, { pierce: true });
+/* ------------------------------------------------------------ mine logic */
+// Full price inside fullR, nothing past blastR, straight line in between.
+function blastDamage(d) {
+  if (d >= MINE.blastR) return 0;
+  if (d <= MINE.fullR) return MINE.dmg;
+  return Math.round(MINE.dmg * (1 - (d - MINE.fullR) / (MINE.blastR - MINE.fullR)));
+}
+
+// It has reached you. Now it latches on, swells, blinks faster and paints its
+// kill zone on the floor: 1.4 seconds to decide what you are worth.
+function armMine(e) {
+  if (e.armed || e.dead) return;
+  e.armed = true;
+  e.fuse = MINE.fuse;
+  e.mine.ring.visible = true;
+  e.mine.dome.visible = true;
+  spawnBurst(e.x, 1.0, e.z, BOOM.arm());
+  shake = Math.min(1.4, shake + 0.35);
+}
+
+function detonateMine(e, { credit = false } = {}) {
+  if (e.dead) return;
+  e.armed = false;
+  const d = Math.hypot(pos.x - e.x, pos.z - e.z);
+  killEnemy(e, { credit, quiet: true });
+  spawnBurst(e.x, 1.0, e.z, BOOM.mine());
+  spawnDebris(e.x, 1.0, e.z, { palette: "blast", count: 20, speed: 20, lift: 14, spread: 1.2, life: 13 });
+  const dmg = blastDamage(d);
+  if (dmg > 0) {
+    hurtFlash = Math.min(1, hurtFlash + 0.3);
+    hurtPlayer(dmg, { pierce: true });
+  }
+  shake = Math.min(1.6, shake + 1.1 * Math.max(0, 1 - d / 26));
+}
+
+function stepMine(e, dt) {
+  const dx = pos.x - e.x;
+  const dz = pos.z - e.z;
+  const d = Math.hypot(dx, dz) || 1e-6;
+  const ux = dx / d;
+  const uz = dz / d;
+  e.t += dt;
+  e.hitT = Math.max(0, e.hitT - dt);
+  e.wanderT += dt;
+
+  if (e.armed) {
+    // planted, swelling, blinking: the fuse is the whole point
+    e.fuse -= dt;
+    const k = 1 - Math.max(0, e.fuse) / MINE.fuse;
+    const blink = 0.5 + 0.5 * Math.sin(e.t * (13 + k * 46));
+    const swell = 1 + k * 0.5 + blink * 0.05;
+    e.mine.hull.scale.setScalar(swell);
+    placeMineHorns(e.mine.horns, 1 + k * 0.7);
+    e.mine.lampMat.emissiveIntensity = 1.2 + blink * 3.4 + k * 2;
+    e.mine.lamp.scale.setScalar(0.85 + blink * 0.5 + k * 0.3);
+    e.mine.ringMat.opacity = 0.3 + blink * 0.45;
+    e.mine.domeMat.opacity = 0.04 + blink * 0.05 + k * 0.06;
+    const grow = 0.28 + k * 0.72;
+    e.mine.ring.scale.setScalar(MINE.blastR * grow);
+    e.mine.dome.scale.setScalar(MINE.blastR * grow);
+    // it bobs where it stopped, so the kill zone stays readable on the floor
+    e.group.position.set(e.x, 1.0 + Math.sin(e.t * 3.2) * 0.06, e.z);
+    e.group.rotation.y += dt * 1.6;
+    e.mine.ring.position.y = 0.03 - e.group.position.y;
+    e.mine.dome.position.y = 0.05 - e.group.position.y;
+    if (e.fuse <= 0) detonateMine(e);
+    return;
+  }
+
+  const blink = 0.5 + 0.5 * Math.sin(e.t * 3.2 + e.phase);
+  e.mine.hull.scale.setScalar(1 + blink * 0.05 + e.hitT * 1.4);
+  e.mine.lampMat.emissiveIntensity = 0.5 + blink * 1.6;
+  e.mine.lamp.scale.setScalar(0.8 + blink * 0.3);
+  e.group.position.set(e.x, 1.1 + Math.sin(bobT * 2.5 + e.x * 0.5) * 0.16, e.z);
+  e.group.rotation.y = Math.atan2(-dx, -dz);
+
+  if (d < e.aggro) {
+    const r = level.slide(e.x, e.z, ux * e.speed * dt, uz * e.speed * dt, ENEMY_R);
+    e.x = r.x;
+    e.z = r.z;
+  } else {
+    idleStep(e, dt);
+  }
+  if (d < (e.r || ENEMY_R) + RADIUS + 0.2) armMine(e);
 }
 
 function tryFire() {
@@ -2023,6 +2238,10 @@ function updateEnemies(dt) {
       stepShade(e, dt);
       continue;
     }
+    if (e.type === "grunt") {
+      stepMine(e, dt);
+      continue;
+    }
     const dx = pos.x - e.x;
     const dz = pos.z - e.z;
     const d = Math.hypot(dx, dz) || 1e-6;
@@ -2031,38 +2250,25 @@ function updateEnemies(dt) {
     const engaged = d < e.aggro;
     e.wanderT += dt;
 
-    if (e.type === "grunt") {
-      if (engaged) {
-        const r = level.slide(e.x, e.z, ux * e.speed * dt, uz * e.speed * dt, ENEMY_R);
+    // what is left here is the spitter: it keeps its distance and shoots
+    if (engaged) {
+      const want = 16;
+      const move = d > want + 3 ? 1 : d < want - 3 ? -1 : 0;
+      if (move) {
+        const r = level.slide(e.x, e.z, ux * move * e.speed * dt, uz * move * e.speed * dt, ENEMY_R);
         e.x = r.x;
         e.z = r.z;
-      } else {
-        idleStep(e, dt);
       }
-      if (d < (e.r || ENEMY_R) + RADIUS + 0.2) {
-        ramPlayer(e);
-        continue;
+      e.fireT -= dt;
+      if (e.fireT <= 0) {
+        e.fireT = e.fireRate * (0.7 + decor() * 0.6);
+        addBullet(eBullets, enemyBulletMat, e.x + ux, 1.1, e.z + uz, ux * 22, uz * 22, 2.6, 8);
       }
     } else {
-      if (engaged) {
-        const want = 16;
-        const move = d > want + 3 ? 1 : d < want - 3 ? -1 : 0;
-        if (move) {
-          const r = level.slide(e.x, e.z, ux * move * e.speed * dt, uz * move * e.speed * dt, ENEMY_R);
-          e.x = r.x;
-          e.z = r.z;
-        }
-        e.fireT -= dt;
-        if (e.fireT <= 0) {
-          e.fireT = e.fireRate * (0.7 + decor() * 0.6);
-          addBullet(eBullets, enemyBulletMat, e.x + ux, 1.1, e.z + uz, ux * 22, uz * 22, 2.6, 8);
-        }
-      } else {
-        idleStep(e, dt);
-        e.fireT = Math.max(e.fireT, 0); // no pot-shots from across the level
-      }
-      if (d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG * 0.5);
+      idleStep(e, dt);
+      e.fireT = Math.max(e.fireT, 0); // no pot-shots from across the level
     }
+    if (d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG * 0.5);
 
     e.hitT = Math.max(0, e.hitT - dt);
     const bob = Math.sin(bobT * 2.5 + e.x * 0.5) * 0.16;
@@ -2089,7 +2295,12 @@ function updateBullets(dt) {
         if (Math.hypot(e.x - b.x, e.z - b.z) < (e.r || ENEMY_R) + BULLET_R) {
           e.hp -= b.dmg;
           e.hitT = 0.12;
-          if (e.hp <= 0) killEnemy(e);
+          // a mine that has already latched on goes off where it stands, so
+          // shooting the blinking thing next to you is not a way out
+          if (e.hp <= 0) {
+            if (e.armed) detonateMine(e, { credit: true });
+            else killEnemy(e);
+          }
           kill = true;
           break;
         }
@@ -2234,6 +2445,7 @@ globalThis.UFO = {
   get guards() { return enemies.filter((e) => !e.dead && e.guard).length; },
   get enemies() { return enemies; },
   get bullets() { return bullets; },
+  get eBullets() { return eBullets; },
   get explosions() { return explosions.length; },
   get particles() { return explosions.reduce((n, e) => n + e.count, 0); },
   get pos() { return pos; },
@@ -2245,9 +2457,11 @@ globalThis.UFO = {
   get shades() { return enemies.filter((e) => e.type === "lurker"); },
   get rifts() { return rifts; },
   get riftsOpened() { return riftsOpened; },
-  get gore() { return gore; },
+  get debris() { return debris; },
   get splats() { return splats; },
   get hunted() { return hunted; },
+  get mine() { return MINE; },
+  blastAt: (d) => blastDamage(d),
   killPlayer,
   get exit() { return level.exit; },
   get rooms() { return level.rooms; },
@@ -2288,7 +2502,7 @@ renderer.setAnimationLoop(() => {
   updateCamera(dt);
   updateDust(dt);
   updateExplosions(dt);
-  updateGore(dt);
+  updateDebris(dt);
   if (state === "playing") updateRifts(dt);
   updateHunt(dt);
   updateHud();
