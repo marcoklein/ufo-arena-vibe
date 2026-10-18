@@ -459,6 +459,70 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(2);
 }
 
+/* the shots are not balls, and the things that shoot look like guns */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  down("Space");
+  frame(2);
+  const bolt = UFO.bullets[0];
+  ok(!!bolt, "firing puts a shot in the air");
+  if (bolt) {
+    ok(bolt.seed === false, "your shot is a bolt, not a seed");
+    ok(bolt.mesh.children.length >= 1, `and it is a dart with a glow on it (${bolt.mesh.children.length} part(s))`);
+    ok(bolt.mesh.geometry !== undefined && !!bolt.mesh.geometry, "with its own shape, not the old ball");
+  }
+  up("Space");
+
+  const shooter = UFO.enemies.find((e) => !e.dead && e.type === "spitter");
+  ok(!!shooter, "a spitter is on the level");
+  if (shooter) {
+    ok(!!shooter.spitter, "and it has a snout and a chamber");
+    ok(shooter.spitter.mouthMat.emissiveIntensity >= 0.8, "the chamber glows before it charges");
+    // stand in its face and let it wind up
+    UFO.move(shooter.x + 14, shooter.z);
+    let peakGlow = 0;
+    let recoiled = false;
+    for (let i = 0; i < 220 && !(recoiled && peakGlow > 3); i++) {
+      frame(1);
+      peakGlow = Math.max(peakGlow, shooter.spitter.mouthMat.emissiveIntensity);
+      if (shooter.recoilT > 0) recoiled = true;
+    }
+    ok(peakGlow > 3, `it lights up before it spits (chamber glow ${peakGlow.toFixed(1)})`);
+    ok(recoiled, "and kicks back when it does");
+    const seed = UFO.eBullets.find((b) => b.seed);
+    ok(!!seed, "what it spits is a seed");
+    ok(seed && seed.mesh.children.length >= 2, `with a ring around it (${seed ? seed.mesh.children.length : 0} parts)`);
+  }
+}
+
+/* the score waits for something to happen, and the game tells it when */
+{
+  const a = UFO.audio;
+  a.clear();
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  ok(a.energy >= 0.4, `arriving on a level pokes the score (${a.energy})`);
+  const arrived = a.energy;
+  down("Space");
+  frame(3);
+  up("Space");
+  ok(a.energy > arrived, `firing pokes it further (${arrived} -> ${a.energy})`);
+
+  a.clear();
+  const loud = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+  UFO.move(loud.x + 2, loud.z);
+  for (let i = 0; i < 30 && !loud.armed; i++) frame(1);
+  ok(a.energy > 0.4, `a mine latching on gets the music up (${a.energy})`);
+  for (let i = 0; i < 200 && !loud.dead; i++) frame(1);
+  ok(a.energy > 0.9, `and the bang takes it to the top (${a.energy})`);
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+}
+
 /* reaching the exit clears the level and advances it */
 {
   UFO.audio.clear();

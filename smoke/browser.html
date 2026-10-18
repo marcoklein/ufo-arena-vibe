@@ -199,6 +199,38 @@
       if (boom === "player") {
         UFO.damage(999);
         await frames(6);
+      } else if (boom === "volley") {
+        // hold fire at something so there are bolts in the air
+        const t = UFO.enemies.find((e) => !e.dead && e.type === "grunt") || UFO.enemies.find((e) => !e.dead);
+        const v = vantage(t.x, t.z, 7) || { x: t.x + 5, z: t.z + 5 };
+        UFO.move(v.x, v.z);
+        UFO.aim(t.x, t.z);
+        await frames(4);
+        key("keydown", "Space");
+        // hold the frame until a bolt is clear of the craft's own glow, or it is
+        // just a bright smear in the middle of the saucer
+        for (let i = 0; i < 200; i++) {
+          await frames(1);
+          if (UFO.bullets.some((b) => Math.hypot(b.x - UFO.pos.x, b.z - UFO.pos.z) > 5)) break;
+        }
+      } else if (boom === "seeds") {
+        // a spitter about to spit: park in its face, wait for the chamber to light
+        // up, then hold the frame until *its* seed is in the air between us
+        const sp = UFO.enemies.find((e) => !e.dead && e.type === "spitter");
+        if (sp) {
+          const v = vantage(sp.x, sp.z, 10) || { x: sp.x + 8, z: sp.z };
+          UFO.move(v.x, v.z);
+          UFO.aim(sp.x, sp.z);
+          for (let i = 0; i < 300; i++) {
+            await frames(1);
+            if (sp.spitter && sp.spitter.mouthMat.emissiveIntensity > 4.5) break;
+          }
+          for (let i = 0; i < 90; i++) {
+            await frames(1);
+            const seed = UFO.eBullets.find((b) => b.seed && Math.hypot(b.x - sp.x, b.z - sp.z) < 16);
+            if (seed && Math.hypot(seed.x - sp.x, seed.z - sp.z) > 4.5) break;
+          }
+        }
       } else if (boom === "enemy") {
         const range = Number(new URLSearchParams(location.search).get("range") || 6);
         const t = UFO.enemies.find((e) => !e.dead);
@@ -314,6 +346,7 @@
           veil: document.getElementById("huntveil").style.opacity,
           huntTag: document.getElementById("hunt").style.display,
           soundTag: document.getElementById("snd") && document.getElementById("snd").textContent,
+          shots: { mine: UFO.bullets.length, theirs: UFO.eBullets.length, seeds: UFO.eBullets.filter((b) => b.seed).length },
           mine,
           audio,
         });

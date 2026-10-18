@@ -42,6 +42,17 @@ const SFX_NEAR = 4;       // inside this it is at full volume
 const LOOKAHEAD = 0.16;   // how far ahead of the clock the score is written
 const PUMP_MS = 40;       // how often it is topped up
 
+/* The music is not a loop that runs forever. It comes in when something is
+   happening, plays a phrase, and then stops again, so exploring a quiet level is
+   actually quiet. Energy is what decides: the game pokes it when you shoot, when
+   something dies, when a mine arms, when a rift opens, when the shade wakes, when
+   you get close to the exit. It bleeds away on its own. */
+const MUSIC_PHRASE = 4;    // bars played in one go
+const MUSIC_REST = 2;      // bars of silence before it can start again
+const MUSIC_DECAY = 0.978; // how fast the room calms down, per sixteenth note
+const MUSIC_KEEP = 0.22;   // still something happening: play the next phrase
+const MUSIC_START = 0.32;  // enough to come in from silence
+
 /* ---------------------------------------------------------------- buffers */
 // A 2.6s reverb tail made from darkened noise: cheap, and it gives the cavern a
 // sense of size without shipping an impulse response file.
@@ -409,24 +420,82 @@ function mDread(rig, t, f, dur, p) {
 /* --------------------------------------------------------- the sequencer */
 // One sixteenth note of the score, in one place, so the live timer and the
 // offline renderer walk exactly the same timeline.
+
+// Four levels of "how much is going on", from a low pulse to the full thing.
+function tierFor(act) {
+  if (act > 0.78) return 4;
+  if (act > 0.55) return 3;
+  if (act > 0.34) return 2;
+  return 1;
+}
+
+// Called on the downbeat of every bar: keep the phrase going, land it, or stay
+// quiet. This is the whole "do not play all the time" rule.
+function barDecision(rig) {
+  const act = clamp01(rig.energy);
+  if (rig.hunted) {
+    rig.on = true;
+    rig.tier = 4;
+    rig.rest = 0;
+    return;
+  }
+  if (rig.barsLeft > 0) {
+    rig.barsLeft--;
+    if (rig.on) rig.tier = tierFor(act); // it can gather or thin out bar by bar
+    return;
+  }
+  if (rig.on) {
+    if (act > MUSIC_KEEP) {
+      rig.tier = tierFor(act);
+      rig.barsLeft = MUSIC_PHRASE;
+      return;
+    }
+    rig.on = false; // the phrase ends and the level goes quiet again
+    rig.tier = 0;
+    rig.rest = MUSIC_REST;
+    return;
+  }
+  if (rig.rest > 0) {
+    rig.rest--;
+    rig.tier = 0;
+    return;
+  }
+  if (act > MUSIC_START) {
+    rig.on = true;
+    rig.tier = tierFor(act);
+    rig.barsLeft = MUSIC_PHRASE;
+  } else {
+    rig.tier = 0;
+  }
+}
+
 function scheduleStep(rig, step) {
   const arr = rig.arr;
   if (!arr) return;
-  const t = rig.musicT0 + step * arr.stepDur;
+  // scripted pokes land on their own step, which is what offline runs use
+  while (rig.pokes.length && rig.pokes[0][0] <= step) {
+    rig.energy = clamp01(rig.energy + rig.pokes.shift()[1]);
+  }
   const bar = Math.floor(step / 16);
   const s = step - bar * 16;
+  if (s === 0) barDecision(rig);
+  rig.energy *= MUSIC_DECAY;
+  if (!rig.on) return; // a rest: no notes at all
+
+  const t = rig.musicT0 + step * arr.stepDur;
   const chord = arr.prog[bar % arr.prog.length];
   const L = arr.layers;
+  const T = rig.tier;
   // every eighth bar the drums drop out for one bar: a breath
   const breath = bar % 8 === 7;
   const p = 1;
 
-  if (L.kick && !breath && arr.kick.includes(s)) { mKick(rig, t, p); rig.notes++; }
-  if (L.hat && !breath) {
+  if (T >= 2 && L.kick && !breath && arr.kick.includes(s)) { mKick(rig, t, p); rig.notes++; }
+  if (T >= 2 && L.hat && !breath) {
     const on = L.snare ? s % 2 === 1 : s % 4 === 2;
     if (on) { mHat(rig, t, p, s % 8 === 6); rig.notes++; }
   }
-  if (L.snare && !breath && (s === 4 || s === 12)) { mSnare(rig, t, p); rig.notes++; }
+  if (T >= 3 && L.snare && !breath && (s === 4 || s === 12)) { mSnare(rig, t, p); rig.notes++; }
 
   if (L.bass) {
     for (const [bs, off] of arr.bass) {
@@ -437,7 +506,7 @@ function scheduleStep(rig, step) {
   }
 
   // the sparkly layers are the first thing the shade takes away
-  if (L.arp && !rig.hunted) {
+  if (T >= 3 && L.arp && !rig.hunted) {
     for (const [as, deg] of arr.arp) {
       if (as !== s) continue;
       mArp(rig, t, degreeNote(arr, chord + deg, 1), p);
@@ -447,7 +516,7 @@ function scheduleStep(rig, step) {
 
   // the tune: an octave above the pad, on the chord, so it is melodic rather
   // than just movement. It survives the shade waking up.
-  if (L.melody) {
+  if (T >= 2 && L.melody) {
     for (const [ms, deg] of arr.motif) {
       if (ms !== s) continue;
       mSing(rig, t, degreeNote(arr, chord + deg, 1), arr.stepDur * 2.6, p);
@@ -458,18 +527,18 @@ function scheduleStep(rig, step) {
   // one long chord per bar, plus the tension layer when the shade is awake
   if (s === 0) {
     if (L.pad) {
-      const shape = arr.layers.bells ? [0, 2, 4, 6] : [0, 2, 4]; // a seventh once it is busy
+      const shape = L.bells ? [0, 2, 4, 6] : [0, 2, 4]; // a seventh once it is busy
       const notes = shape.map((d) => degreeNote(arr, chord + d));
       mPad(rig, t, notes, arr.stepDur * 17, p);
       rig.notes += notes.length;
     }
-    if (L.lead) { mLead(rig, t, degreeNote(arr, chord, 1) * 2 ** (6 / 12), p); rig.notes++; }
+    if (T >= 4 && L.lead) { mLead(rig, t, degreeNote(arr, chord, 1) * 2 ** (6 / 12), p); rig.notes++; }
   }
-  if (L.bells && !rig.hunted && (s === 6 || s === 14)) {
+  if (T >= 3 && L.bells && !rig.hunted && (s === 6 || s === 14)) {
     mBell(rig, t, degreeNote(arr, chord + (s === 6 ? 4 : 9), 2), p);
     rig.notes++;
   }
-  if (rig.hunted) {
+  if (T >= 4 && rig.hunted) {
     // the shade is up: a beating tritone drone under everything, sour notes over
     // the top, and the snares double up. This is a change of character, not a
     // layer being switched on.
@@ -516,6 +585,7 @@ function makeEngine({ ctx = null } = {}) {
     level: 0,
     hunted: false,
     runState: "playing",
+    energy: 0,      // how much is going on; the music lives off this
     gestured: false,
     lx: 0,
     lz: 0,
@@ -540,15 +610,33 @@ function makeEngine({ ctx = null } = {}) {
     if (eng.rig) eng.rig.hunted = eng.hunted;
   };
 
+  // something happened, so the room got louder. Everything the game does that is
+  // worth scoring comes through here.
+  eng.poke = (amount = 0.3) => {
+    eng.energy = clamp01(eng.energy + amount);
+    if (eng.rig) eng.rig.energy = clamp01(eng.rig.energy + amount);
+  };
+
   eng.music = (o = {}) => {
     if (o.level != null) eng.level = Math.round(o.level);
     if (o.state) eng.runState = o.state;
     const rig = eng.rig;
     if (!rig) return;
-    if (eng.level && (!rig.arr || rig.arr.level !== eng.level)) {
+    const fresh = !rig.arr;
+    if (eng.level && (fresh || rig.arr.level !== eng.level)) {
       rig.arr = arrangement(eng.level);
       rig.step = 0;
       rig.musicT0 = ctx.currentTime + 0.08;
+      // a real level change starts from quiet and waits for something to happen;
+      // a rig being built for the first time inherits what the game already did
+      if (!fresh) {
+        rig.energy = 0;
+        rig.on = false;
+        rig.tier = 0;
+        rig.rest = 0;
+        rig.barsLeft = 0;
+        rig.pokes.length = 0;
+      }
       if (rig.delay) rig.delay.delayTime.value = clamp(rig.arr.stepDur * 3, 0.05, 1);
     }
     if (!rig.arr) {
@@ -556,12 +644,7 @@ function makeEngine({ ctx = null } = {}) {
       rig.step = 0;
       rig.musicT0 = ctx.currentTime + 0.08;
     }
-    if (o.state) {
-      const duck = o.state !== "playing";
-      rig.ducked = duck;
-      rig.musicBus.gain.cancelScheduledValues(ctx.currentTime);
-      rig.musicBus.gain.setTargetAtTime(eng.muted ? 0.0001 : duck ? MUSIC_DUCK : MUSIC_VOL, ctx.currentTime, 0.12);
-    }
+    applyMusicGain(eng);
   };
 
   // Browsers hand out a suspended AudioContext until they are good and ready
@@ -593,7 +676,10 @@ function makeEngine({ ctx = null } = {}) {
   eng.setMuted = (v) => {
     eng.muted = !!v;
     saveMuted(eng.muted);
-    if (eng.rig) applyMute(eng);
+    if (eng.rig) {
+      applyMute(eng);
+      applyMusicGain(eng);
+    }
   };
   eng.toggleMute = () => {
     eng.setMuted(!eng.muted);
@@ -606,6 +692,9 @@ function makeEngine({ ctx = null } = {}) {
     level: eng.level,
     hunted: eng.hunted,
     runState: eng.runState,
+    energy: Number((eng.rig ? eng.rig.energy : eng.energy).toFixed(3)),
+    playing: eng.rig ? eng.rig.on : false,
+    tier: eng.rig ? eng.rig.tier : 0,
     notes: eng.rig ? eng.rig.notes : 0,
     step: eng.rig ? eng.rig.step : 0,
     arr: eng.rig ? eng.rig.arr : null,
@@ -615,7 +704,11 @@ function makeEngine({ ctx = null } = {}) {
   // the smoke harness checks that the game asked for the right sounds
   eng.clear = () => {
     eng.log.length = 0;
-    if (eng.rig) eng.rig.notes = 0;
+    eng.energy = 0;
+    if (eng.rig) {
+      eng.rig.notes = 0;
+      eng.rig.energy = 0;
+    }
   };
 
   // loudest sample that left the mix in the last ~46ms, so a live run can be
@@ -645,6 +738,12 @@ function makeEngine({ ctx = null } = {}) {
     arr: null,
     hunted: eng.hunted,
     ducked: false,
+    energy: eng.energy,
+    on: false,
+    tier: 0,
+    rest: 0,
+    barsLeft: 0,
+    pokes: [],
   };
   {
     const master = ctx.createGain();
@@ -761,6 +860,18 @@ function applyMute(eng) {
   eng.rig.master.gain.setTargetAtTime(eng.muted ? 0.0001 : MASTER_VOL, now, 0.05);
 }
 
+// The score's own level: out of the way while the run is over, gone entirely when
+// the sound is off. Whether it is *playing* is a different matter - that is the
+// sequencer's business (see barDecision).
+function applyMusicGain(eng) {
+  const rig = eng.rig;
+  if (!rig) return;
+  const now = eng.ctx.currentTime;
+  const target = eng.muted ? 0.0001 : eng.runState === "playing" ? MUSIC_VOL : MUSIC_DUCK;
+  rig.musicBus.gain.cancelScheduledValues(now);
+  rig.musicBus.gain.setTargetAtTime(target, now, 0.2);
+}
+
 /* ----------------------------------------------------------- the singleton */
 // No AudioContext is built until the player touches something: browsers refuse
 // to start audio without a gesture, and building one early is a console warning
@@ -786,6 +897,7 @@ function createGameAudio() {
     get state() { return eng.rig ? eng.stats().state : "off"; },
     get muted() { return eng.muted; },
     get log() { return eng.log; },
+    get energy() { return eng.stats().energy; },
     get level() { return eng.level; },
     get hunted() { return eng.hunted; },
     get arrangement() { return eng.level ? arrangement(eng.level) : null; },
@@ -799,15 +911,18 @@ function createGameAudio() {
       if (typeof live !== "function") return false;
       try {
         if (!eng.rig) {
-          const level = eng.level;
-          const runState = eng.runState;
-          const muted = eng.muted;
-          const hunted = eng.hunted;
+          // whatever the game did before the player touched anything is carried
+          // over, energy included: the level-start phrase should still play
+          const { level, runState, muted, hunted, energy } = eng;
           eng = makeEngine({ ctx: new live() });
           eng.level = level;
           eng.runState = runState;
           eng.hunted = hunted;
-          if (eng.rig) eng.rig.hunted = hunted;
+          eng.energy = energy;
+          if (eng.rig) {
+            eng.rig.hunted = hunted;
+            eng.rig.energy = energy;
+          }
           eng.muted = muted;
           if (eng.level) eng.music({ level: eng.level, state: runState });
           if (muted) applyMute(eng);
@@ -827,6 +942,7 @@ function createGameAudio() {
     listener: (x, z, yaw) => eng.listener(x, z, yaw),
     music: (o) => eng.music(o),
     hunt: (on) => eng.hunt(on),
+    poke: (amount) => eng.poke(amount),
     setMuted: (v) => eng.setMuted(v),
     toggleMute: () => eng.toggleMute(),
     peak: () => eng.peak(),
@@ -886,7 +1002,8 @@ function windowRms(buf, from, to) {
 }
 
 export async function measure({
-  seconds = 6, level = 1, hunted = false, sfx = [], spacing = 0.75, music = true, at = { x: 5, z: -3 },
+  seconds = 6, level = 1, hunted = false, sfx = [], spacing = 0.75, music = true,
+  at = { x: 5, z: -3 }, pokes = [], slices = 0,
 } = {}) {
   const OAC = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
   if (typeof OAC !== "function") return { error: "no OfflineAudioContext here" };
@@ -896,6 +1013,16 @@ export async function measure({
   eng.listener(0, 0, 0);
   if (music) eng.music({ level, state: "playing" });
   eng.hunt(hunted);
+
+  // scripted pokes, given in seconds, land on their own step: same code path as
+  // the game poking the engine, just on a fixed timeline
+  const arr = eng.rig.arr;
+  if (arr) {
+    for (const [t, amount] of pokes) {
+      eng.rig.pokes.push([Math.max(0, Math.round(t / arr.stepDur)), amount]);
+    }
+    eng.rig.pokes.sort((a, b) => a[0] - b[0]);
+  }
 
   const slots = [];
   sfx.forEach((entry, i) => {
@@ -913,14 +1040,30 @@ export async function measure({
   const buf = await ctx.startRendering();
   const windows = {};
   for (const s of slots) windows[s.label] = windowRms(buf, s.from, Math.min(s.to, seconds));
+
+  // an optional second-by-second trace, which is how the "and then it goes quiet"
+  // behaviour is checked
+  const timeline = [];
+  if (slices > 0) {
+    for (let t = 0; t < seconds; t += slices) {
+      const w = windowRms(buf, t, Math.min(seconds, t + slices));
+      timeline.push({ t: Number(t.toFixed(2)), rms: w.rms });
+    }
+  }
+
+  const rig = eng.rig;
   return {
     seconds,
     level,
     hunted,
-    notes: eng.rig.notes,
-    steps: eng.rig.step,
-    arr: eng.rig.arr,
+    notes: rig.notes,
+    steps: rig.step,
+    arr: rig.arr,
+    played: rig.barsLeft > 0 || rig.on,
+    tier: rig.tier,
+    energy: Number(rig.energy.toFixed(3)),
     overall: windowRms(buf, 0, seconds),
     windows,
+    timeline,
   };
 }

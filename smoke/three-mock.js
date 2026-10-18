@@ -13,6 +13,7 @@ class Vec {
   divideScalar(s) { return this.multiplyScalar(1 / s); }
   length() { return Math.hypot(this.x, this.y, this.z); }
   lengthSq() { return this.x * this.x + this.y * this.y + this.z * this.z; }
+  normalize() { const l = this.length() || 1; return this.divideScalar(l); }
   clone() { return new Vec(this.x, this.y, this.z); }
 }
 
@@ -98,6 +99,7 @@ export class ConeGeometry extends Geo {}
 export class TorusGeometry extends Geo {}
 export class RingGeometry extends Geo {}
 export class IcosahedronGeometry extends Geo {}
+export class OctahedronGeometry extends Geo {}
 
 export class BufferGeometry {
   constructor() { this.attributes = {}; }

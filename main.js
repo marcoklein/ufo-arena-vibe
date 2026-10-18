@@ -25,6 +25,7 @@ const NOSE = 1.5;        // muzzle offset from the craft centre
 
 const ENEMY_R = 1.05;
 const TOUCH_DMG = 12;      // a spitter brushing past you
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 
 /* the red diamonds are floating mines. Touching one latches it on, and then it
    swells and blinks for a moment before going off, so there is a window to back
@@ -749,6 +750,48 @@ const ENEMY_SPEC = {
   spitter: { hp: 3, speed: 3.8 },
 };
 
+/* ------------------------------------------------------------ the spitter */
+// The one that shoots. A mine reads as a mine; this has to read as a *gun*: a
+// snout aimed at you and a chamber on the end of it that lights up hotter and
+// hotter until it fires, then kicks back. The glow is the warning.
+const spitterSnoutGeo = new THREE.ConeGeometry(0.34, 0.9, 6);
+const spitterMouthGeo = new THREE.SphereGeometry(0.17, 8, 6);
+const spitterFinGeo = new THREE.BoxGeometry(0.09, 0.46, 0.34);
+const spitterSnoutMat = new THREE.MeshStandardMaterial({
+  color: 0x2b1c4d, roughness: 0.5, metalness: 0.45, emissive: 0x3a1a66, emissiveIntensity: 0.4,
+});
+const spitterFinMat = new THREE.MeshStandardMaterial({
+  color: 0x3a2a63, roughness: 0.6, metalness: 0.35, emissive: 0x2a1550, emissiveIntensity: 0.35,
+});
+const spitterMouthMat = new THREE.MeshStandardMaterial({
+  color: 0xffe0ff, emissive: 0xb44bff, emissiveIntensity: 0.8,
+});
+
+function buildSpitter() {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(enemyBodyGeo, enemyBodyMat.spitter);
+  group.add(body);
+  const eye = new THREE.Mesh(enemyEyeGeo, enemyEyeMat.spitter);
+  eye.position.set(0, 0.1, -0.6);
+  group.add(eye);
+  // local -Z is "at the player": the group is yawed onto the craft every frame
+  const snout = new THREE.Mesh(spitterSnoutGeo, spitterSnoutMat);
+  snout.rotation.x = -Math.PI / 2;
+  snout.position.set(0, -0.05, -0.72);
+  group.add(snout);
+  const mouthMat = spitterMouthMat.clone(); // its own, so it can charge up
+  const mouth = new THREE.Mesh(spitterMouthGeo, mouthMat);
+  mouth.position.set(0, -0.05, -1.12);
+  group.add(mouth);
+  for (const side of [-1, 1]) {
+    const fin = new THREE.Mesh(spitterFinGeo, spitterFinMat);
+    fin.position.set(side * 0.74, 0.06, 0.12);
+    fin.rotation.z = side * 0.34;
+    group.add(fin);
+  }
+  return { group, body, eye, snout, mouth, mouthMat };
+}
+
 /* ------------------------------------------------------------ the mine */
 // A red diamond is a floating mine: a riveted hull, ten horns, a running light,
 // and a ring on the floor that paints exactly how far the blast reaches.
@@ -847,29 +890,20 @@ function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0 } = {}) {
   if (type === "lurker") return spawnShade(x, z, power);
   const spec = ENEMY_SPEC[type];
   const mine = type === "grunt" ? buildMine(x, z) : null;
-  let group, body, eye;
-  if (mine) {
-    ({ group, body } = mine);
-    eye = mine.lamp;
-  } else {
-    group = new THREE.Group();
-    body = new THREE.Mesh(enemyBodyGeo, enemyBodyMat[type]);
-    group.add(body);
-    eye = new THREE.Mesh(enemyEyeGeo, enemyEyeMat[type]);
-    eye.position.set(0, 0.1, -0.6);
-    group.add(eye);
-    group.position.set(x, 1.1, z);
-  }
+  const spitter = mine ? null : buildSpitter();
+  const { group, body, eye } = mine || spitter;
+  if (!mine) group.position.set(x, 1.1, z);
   enemyGroup.add(group);
 
   const hp = spec.hp + Math.floor(power / 3) + hpBonus;
   return {
-    type, group, body, eye, mine,
+    type, group, body, eye, mine, spitter,
     x, z, hp, maxHp: hp, r: ENEMY_R,
     speed: spec.speed * (1 + power * 0.05),
     fireT: 1 + decor(),
     fireRate: Math.max(0.7, 2.4 - power * 0.13),
     hitT: 0,
+    recoilT: 0,
     dead: false,
     // mines only:  armed => the fuse is burning, and it is about to go off
     armed: false,
@@ -918,18 +952,59 @@ function idleStep(e, dt) {
 /* --------------------------------------------------------------- bullets */
 const bulletGroup = new THREE.Group();
 scene.add(bulletGroup);
-const bulletGeo = new THREE.SphereGeometry(0.22, 10, 8);
-const playerBulletMat = new THREE.MeshBasicMaterial({ color: 0xa8f4ff, toneMapped: false });
-const enemyBulletMat = new THREE.MeshBasicMaterial({ color: 0xff7bd8, toneMapped: false });
+
+/* The shots are not balls. Your cannon throws a needle of light; a spitter spits
+   a tumbling seed with a ring around it, so what is coming at you is never in
+   doubt. Both geometries point along +Y, so a shot is aimed by turning that axis
+   onto its velocity. */
+const boltGeo = new THREE.ConeGeometry(0.34, 2.4, 6);
+const seedGeo = new THREE.OctahedronGeometry(0.5, 0);
+const seedRingGeo = new THREE.TorusGeometry(0.6, 0.1, 6, 14);
+const boltMat = new THREE.MeshBasicMaterial({ color: 0x9defff, toneMapped: false });
+const seedMat = new THREE.MeshBasicMaterial({ color: 0xffa8e8, toneMapped: false });
+const seedRingMat = new THREE.MeshBasicMaterial({ color: 0xb44bff, toneMapped: false });
+
+// the glow rides along as a sprite child; built on first use, because the spark
+// texture lives further down the file
+let shotGlowMats = null;
+function shotGlow(kind) {
+  if (!shotGlowMats) {
+    shotGlowMats = {
+      bolt: new THREE.SpriteMaterial({
+        map: sparkTex, color: 0x6ce9ff, transparent: true, opacity: 0.7,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+      seed: new THREE.SpriteMaterial({
+        map: sparkTex, color: 0xb44bff, transparent: true, opacity: 0.75,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }),
+    };
+  }
+  return shotGlowMats[kind];
+}
+
+const SHOT_UP = new THREE.Vector3(0, 1, 0);
+const shotDir = new THREE.Vector3();
 
 let bullets = [];
 let eBullets = [];
 
-function addBullet(list, mat, x, y, z, vx, vz, life, dmg) {
-  const mesh = new THREE.Mesh(bulletGeo, mat);
+function addBullet(list, kind, x, y, z, vx, vz, life, dmg) {
+  const isSeed = kind === "seed";
+  const mesh = new THREE.Mesh(isSeed ? seedGeo : boltGeo, isSeed ? seedMat : boltMat);
+  shotDir.set(vx, 0, vz).normalize();
+  mesh.quaternion.setFromUnitVectors(SHOT_UP, shotDir);
   mesh.position.set(x, y, z);
+  if (isSeed) {
+    const ring = new THREE.Mesh(seedRingGeo, seedRingMat);
+    ring.rotation.x = Math.PI / 2; // a ring across the flight axis
+    mesh.add(ring);
+  }
+  const glow = new THREE.Sprite(shotGlow(isSeed ? "seed" : "bolt"));
+  glow.scale.setScalar(isSeed ? 1.3 : 0.85);
+  mesh.add(glow);
   bulletGroup.add(mesh);
-  list.push({ x, y, z, vx, vz, life, dmg, mesh });
+  list.push({ x, y, z, vx, vz, life, dmg, mesh, seed: isSeed });
 }
 
 /* ------------------------------------------------------------- explosions */
@@ -1531,6 +1606,7 @@ function wakeShade(e) {
   e.wakeT = e.wakeDur;
   spawnBurst(e.x, 1.2, e.z, BOOM.shadeWake());
   gameAudio.sfx("shadeWake", { x: e.x, z: e.z });
+  gameAudio.poke(1);
   shake = Math.min(1.6, shake + 0.75);
   hurtFlash = Math.min(1, hurtFlash + 0.22);
 }
@@ -1784,6 +1860,7 @@ function openRift(rf) {
   enemies.push(e);
   spawnBurst(rf.x, 1.1, rf.z, BOOM.rift());
   gameAudio.sfx("rift", { x: rf.x, z: rf.z });
+  gameAudio.poke(0.35);
   const d = Math.hypot(pos.x - rf.x, pos.z - rf.z);
   if (d < 22) shake = Math.min(1.3, shake + 0.32 * (1 - d / 22));
 }
@@ -2054,6 +2131,7 @@ function startLevel(n) {
   updateSoundHud();
   // the score is composed per level: new key, new tempo, more going on
   gameAudio.music({ level: n, state: "playing" });
+  gameAudio.poke(0.45);            // a phrase on arrival, then it waits for you
   if (n > 1) gameAudio.sfx("levelUp");
 }
 
@@ -2091,6 +2169,7 @@ function hurtPlayer(dmg, { pierce = false } = {}) {
   hurtFlash = Math.min(1, hurtFlash + 0.5 + dmg * 0.02);
   shake = Math.min(1.2, shake + 0.16);
   gameAudio.sfx("hurt");
+  gameAudio.poke(0.45);
   if (hp <= 0) killPlayer();
 }
 
@@ -2099,6 +2178,7 @@ function killEnemy(e, { credit = true, quiet = false } = {}) {
   e.dead = true;
   enemyGroup.remove(e.group);
   if (credit) GAME.kills++;
+  gameAudio.poke(0.35);
   if (!quiet) {
     gameAudio.sfx(e.type === "lurker" ? "killShade" : "kill", { x: e.x, z: e.z });
     if (e.type === "lurker") {
@@ -2136,6 +2216,7 @@ function armMine(e) {
   spawnBurst(e.x, 1.0, e.z, BOOM.arm());
   shake = Math.min(1.4, shake + 0.35);
   gameAudio.sfx("mineArm", { x: e.x, z: e.z });
+  gameAudio.poke(0.5);
 }
 
 function detonateMine(e, { credit = false } = {}) {
@@ -2146,6 +2227,7 @@ function detonateMine(e, { credit = false } = {}) {
   spawnBurst(e.x, 1.0, e.z, BOOM.mine());
   spawnDebris(e.x, 1.0, e.z, { palette: "blast", count: 20, speed: 20, lift: 14, spread: 1.2, life: 13 });
   gameAudio.sfx("boom", { x: e.x, z: e.z });
+  gameAudio.poke(0.75);
   const dmg = blastDamage(d);
   if (dmg > 0) {
     hurtFlash = Math.min(1, hurtFlash + 0.3);
@@ -2222,11 +2304,12 @@ function tryFire() {
   fireT = FIRE_COOLDOWN;
   const fx = Math.sin(yaw);
   const fz = -Math.cos(yaw);
-  addBullet(bullets, playerBulletMat, pos.x + fx * NOSE, HOVER, pos.z + fz * NOSE,
+  addBullet(bullets, "bolt", pos.x + fx * NOSE, HOVER, pos.z + fz * NOSE,
     fx * BULLET_SPEED, fz * BULLET_SPEED, BULLET_LIFE, 1);
   ufoMuzzle.visible = true;
   muzzleT = 0.06;
   gameAudio.sfx("shoot");
+  gameAudio.poke(0.14);
 }
 
 /* ------------------------------------------------------------------- step */
@@ -2318,8 +2401,9 @@ function updateEnemies(dt) {
       e.fireT -= dt;
       if (e.fireT <= 0) {
         e.fireT = e.fireRate * (0.7 + decor() * 0.6);
-        addBullet(eBullets, enemyBulletMat, e.x + ux, 1.1, e.z + uz, ux * 22, uz * 22, 2.6, 8);
+        addBullet(eBullets, "seed", e.x + ux * 1.35, 1.05, e.z + uz * 1.35, ux * 22, uz * 22, 2.6, 8);
         gameAudio.sfx("enemyShot", { x: e.x, z: e.z });
+        e.recoilT = 0.18; // it kicks back, and you can see it
       }
     } else {
       idleStep(e, dt);
@@ -2328,12 +2412,20 @@ function updateEnemies(dt) {
     if (d < (e.r || ENEMY_R) + RADIUS + 0.2) hurtPlayer(TOUCH_DMG * 0.5);
 
     e.hitT = Math.max(0, e.hitT - dt);
+    e.recoilT = Math.max(0, e.recoilT - dt);
+    // it charges up before it spits: the chamber swells and glows harder the
+    // closer it is to firing, which is the tell you get to react to
+    const charge = engaged ? clamp01(1 - e.fireT / 0.75) : 0;
     const bob = Math.sin(bobT * 2.5 + e.x * 0.5) * 0.16;
-    const s = 1 + e.hitT * 2.5;
+    const s = 1 + e.hitT * 2.5 + charge * 0.12;
     e.group.position.set(e.x, 1.1 + bob, e.z);
     e.group.rotation.y = Math.atan2(-dx, -dz);
     e.group.rotation.z = Math.sin(bobT * 3 + e.z) * 0.16;
     e.body.scale.setScalar(s);
+    e.spitter.mouthMat.emissiveIntensity = 0.8 + charge * 4.5;
+    e.spitter.mouth.scale.setScalar(0.7 + charge * 0.8);
+    e.spitter.snout.position.z = -0.72 + e.recoilT * 0.55;
+    e.spitter.mouth.position.z = -1.12 + e.recoilT * 0.55;
   }
 }
 
@@ -2403,6 +2495,7 @@ function checkExit() {
     clearedT = 0;
     spawnBurst(ex, 1.4, ez, BOOM.exit());
     gameAudio.sfx("exit");
+    gameAudio.poke(0.9);
     shake = Math.min(1.3, shake + 0.5);
     later(0.85, () => {
       if (state !== "cleared") return;
@@ -2554,6 +2647,10 @@ renderer.setAnimationLoop(() => {
     updateEnemies(dt);
     updateBullets(dt);
     checkExit();
+    // the exit is where the run is decided, and the score knows it
+    const ex = level.cellToWorldX(level.exit.col);
+    const ez = level.cellToWorldZ(level.exit.row);
+    if (Math.hypot(pos.x - ex, pos.z - ez) < 26) gameAudio.poke(0.55 * dt);
   } else {
     updateUfo(dt, 0, 0);
     if (state === "cleared") {

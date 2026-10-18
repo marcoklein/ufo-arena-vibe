@@ -24,7 +24,9 @@ node test.mjs
 Boots the **real** `main.js` against a stubbed three.js (`three-mock.js`, wired
 up by `loader.mjs`) and a fake DOM, then drives the actual game loop with
 scripted input: drives, turns, shoots, kills a monster, arms a mine and eats the
-blast, walks out of one and does not, reaches the exit, advances a level, dies and
+blast, parks on top of one and watches it go off on the spot, walks out of one and
+does not, counts what the spitters are carrying, checks that the score is only
+poked by things worth scoring, reaches the exit, advances a level, dies and
 restarts.
 
 ```
@@ -53,6 +55,8 @@ node smoke/shot.mjs smoke/out/rift.png  "&pose=rift"     # a monster spawn point
 node smoke/shot.mjs smoke/out/mine.png  "&pose=mine"     # a red diamond, spiked and blinking
 node smoke/shot.mjs smoke/out/fuse.png  "&pose=fuse"     # caught in one when it arms
 node smoke/shot.mjs smoke/out/blast.png "&pose=blast"    # ...and the moment it goes off
+node smoke/shot.mjs smoke/out/volley.png "&boom=volley"      # your bolts in the air
+node smoke/shot.mjs smoke/out/seeds.png  "&boom=seeds"       # a spitter with a seed out
 node smoke/shot.mjs smoke/out/boom-enemy.png "&boom=enemy"   # freeze mid-fireball
 node smoke/shot.mjs smoke/out/boom-player.png "&boom=player" # the craft going up
 ```
@@ -64,7 +68,11 @@ Poses: `none`, `enemy`, `exit`, `prop`, `lurk` (a shade still asleep), `shade`
 `&keys=1` (report the yaw swing of a scripted drive-and-steer), `&hunt=1` (wake a
 shade), `&mine=1` (arm a red diamond, see the fuse, then the damage it did),
 `&audio=1` (bring the audio up on a key press and report what it did),
+`&boom=volley` (hold fire with a bolt clear of the craft's own glow) and
+`&boom=seeds` (wait for a spitter's chamber to light up, then hold the frame until
+the seed it spits is in the air),
 `&settle=N` (let the level run by itself for N frames before the probe reads it).
+The probe also reports `shots` (how many of each kind are in the air).
 
 ## 5. Sound — `smoke/audio.mjs` (+ `smoke/audio.html`)
 
@@ -79,6 +87,9 @@ node smoke/audio.mjs --json   # the same numbers, raw
 It renders the real voices through an `OfflineAudioContext` and reports RMS and
 peak per sound, per level, for each channel — so "is it audible, does it change
 per level, does the pan work, does mute silence it" are all numbers, not opinions.
+It also renders the score on a scripted timeline of pokes (`pokes: [[seconds,
+amount]]`) and traces the level second by second, which is how the music is
+checked to come in on action, play a phrase, and then stop again.
 Then it opens the **real game** in a real Chrome over the DevTools protocol,
 presses a key for the autoplay gesture, and samples the mixer's master bus in
 real time to prove that sound actually leaves the game.
@@ -137,4 +148,7 @@ UFO.audio.state, UFO.audio.muted, UFO.audio.log, UFO.audio.arrangement
 UFO.audio.stats()            // context state, level, hunt, voices written
 UFO.audio.peak()             // loudest sample on the master bus in the last ~46ms
 UFO.audio.toggleMute(), UFO.audio.sfx(name, { x, z }), UFO.audio.music({ level })
+UFO.audio.poke(0.4)          // something happened: let the score hear about it
+UFO.audio.energy             // how much is going on (0..1); the music lives off it
+UFO.audio.stats().playing    // is the score playing right now, and at which tier
 ```

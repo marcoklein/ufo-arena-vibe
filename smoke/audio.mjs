@@ -108,7 +108,7 @@ const SPEC = `(async () => {
   const sfx = Object.fromEntries(Object.entries(fx.windows).map(([k, v]) => [k, { rms: v.rms, peak: v.peak }]));
 
   const scoreAt = async (level, hunted) => {
-    const m = await measure({ seconds: 8, level, hunted });
+    const m = await measure({ seconds: 8, level, hunted, pokes: [[0, 1], [5, 1]] });
     return {
       rms: m.overall.rms, low: m.overall.low, high: m.overall.high,
       peak: m.overall.peak, notes: m.notes, steps: m.steps,
@@ -124,6 +124,15 @@ const SPEC = `(async () => {
     l9hunted: await scoreAt(9, true),
   };
 
+  // does it only play when something is happening, and does it stop again
+  const kept = await measure({
+    seconds: 26, level: 1, slices: 1,
+    pokes: [[0, 1], [3, 1], [6, 1], [9, 1], [12, 1], [15, 1], [18, 1], [21, 1], [24, 1]],
+  });
+  const burst = await measure({ seconds: 26, level: 1, slices: 1, pokes: [[0, 1]] });
+  const huntedOnly = await measure({ seconds: 14, level: 1, hunted: true, slices: 1 });
+  const dynamics = { kept, burst, huntedOnly };
+
   // the same blip placed to the right, to the left, and far away
   const pan = await measure({
     seconds: 5, level: 1, music: false, spacing: 1.3,
@@ -136,13 +145,13 @@ const SPEC = `(async () => {
 
   // and the mute switch has to silence the render
   A.setMuted(true);
-  const quiet = await measure({ seconds: 6, level: 5 });
+  const quiet = await measure({ seconds: 8, level: 5, pokes: [[0, 1], [3, 1]] });
   A.setMuted(false);
-  const loud = await measure({ seconds: 6, level: 5 });
+  const loud = await measure({ seconds: 8, level: 5, pokes: [[0, 1], [3, 1]] });
 
   return JSON.stringify({
     ms: Math.round(performance.now() - t0),
-    sfx, score, placement: pan.windows,
+    sfx, score, dynamics: dynamics, placement: pan.windows,
     mute: { muted: quiet.overall.rms, unmuted: loud.overall.rms },
   });
 })()`;
@@ -179,8 +188,10 @@ if (booted) {
     await sleep(120);
   };
 
-  // one key press, then listen to the master bus for a few seconds of real time
+  // a couple of key presses (one to satisfy autoplay, one to shoot), then listen
+  // to the master bus for a few seconds of real time
   await tap("KeyW", "w", 87);
+  await tap("Space", " ", 32);
   live.peak = await evaluate(`(async () => {
     let peak = 0;
     const id = setInterval(() => { peak = Math.max(peak, UFO.audio.peak()); }, 10);
@@ -251,6 +262,21 @@ ok(s.l9hunted.rms > s.l9.rms * 1.02, `and the mix measurably changes (rms ${s.l9
 for (const [k, v] of Object.entries(s)) {
   console.log(`  info: ${k.padEnd(9)} ${v.bpm}bpm ${v.mode.padEnd(8)} root ${v.root}Hz  rms ${v.rms} (low ${v.low} high ${v.high})  notes ${v.notes}\n        layers ${v.layers}\n        motif  ${v.motif}`);
 }
+
+console.log("\nthe score only plays when something is happening:");
+const sliceAt = (t, tl) => (tl.find((x) => x.t === t) || {}).rms || 0;
+const loudUntil = (tl) => tl.reduce((last, x) => (x.rms > 0.002 ? x.t : last), -1);
+const dyn = data.dynamics;
+
+ok(sliceAt(1, dyn.burst.timeline) > 0.003, `one thing happening and the music comes in (rms ${sliceAt(1, dyn.burst.timeline)} at 1s)`);
+ok(dyn.burst.notes > 40, `it plays a phrase for it (${dyn.burst.notes} voices)`);
+ok(loudUntil(dyn.burst.timeline) < 21, `and then stops of its own accord (last sound at ${loudUntil(dyn.burst.timeline)}s)`);
+ok(sliceAt(25, dyn.burst.timeline) < 0.001, `leaving the level properly quiet (rms ${sliceAt(25, dyn.burst.timeline)} at 25s)`);
+ok(sliceAt(25, dyn.kept.timeline) > 0.002, `keep poking it and it keeps playing (rms ${sliceAt(25, dyn.kept.timeline)} at 25s)`);
+ok(sliceAt(5, dyn.huntedOnly.timeline) > 0.003 && sliceAt(13, dyn.huntedOnly.timeline) > 0.003, `and the shade awake holds it on with no action at all (rms ${sliceAt(13, dyn.huntedOnly.timeline)} at 13s)`);
+console.log(`  info: one poke -> music until ${loudUntil(dyn.burst.timeline)}s, then silence`);
+console.log(`  info: poked every 3s -> rms ${sliceAt(25, dyn.kept.timeline)} at 25s`);
+console.log(`  info: hunted, no pokes -> rms ${sliceAt(3, dyn.huntedOnly.timeline)} / ${sliceAt(8, dyn.huntedOnly.timeline)} / ${sliceAt(13, dyn.huntedOnly.timeline)} at 3/8/13s`);
 
 console.log("\nplacement:");
 const p = data.placement;
