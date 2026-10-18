@@ -247,7 +247,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(!!mine, "there is a red diamond to run into");
   if (mine) {
     ok(mine.mine && mine.mine.horns.count === 10, `it is a spiked mine (${mine.mine && mine.mine.horns.count} horns)`);
-    UFO.move(mine.x + 1.0, mine.z);
+    UFO.move(mine.x + 2.0, mine.z);   // close enough to latch, not close enough to trip it
     let armed = false;
     for (let i = 0; i < 20 && !armed; i++) {
       frame(1);
@@ -277,7 +277,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   up("KeyR");
   frame(2);
   const mine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
-  UFO.move(mine.x + 1.0, mine.z);
+  UFO.move(mine.x + 2.0, mine.z);   // close enough to latch, not close enough to trip it
   for (let i = 0; i < 20 && !mine.armed; i++) frame(1);
   ok(mine.armed, "a fresh mine arms again");
   UFO.move(mine.x + blastR + 4, mine.z);   // well outside the ring
@@ -299,6 +299,27 @@ ok(!UFO.stuck, "player starts outside the walls");
   ok(UFO.blastAt(99) === 0, "and past the rim there is nothing to talk about");
 }
 
+/* and you cannot simply drive over one: sitting on it sets it off on the spot */
+{
+  down("KeyR");
+  up("KeyR");
+  frame(2);
+  const hp0 = UFO.hp;
+  const k0 = UFO.kills;
+  const mine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
+  ok(!!mine, "there is a mine to park on");
+  if (mine) {
+    ok(!!UFO.mine.tripR, `a mine has a radius you cannot enter (${UFO.mine.tripR}u)`);
+    UFO.move(mine.x, mine.z); // dead centre, as if driving over it
+    frame(2);
+    ok(mine.dead, "sitting on top of it sets it off at once");
+    ok(mine.armed === false, "with no fuse to wait out");
+    const lost = hp0 - UFO.hp;
+    ok(lost >= 20, `and that close it is the whole fifth (${hp0} -> ${UFO.hp}, -${lost})`);
+    ok(UFO.kills === k0, "still not credited as a kill of yours");
+  }
+}
+
 /* and half a ring away costs half the price */
 {
   const mid = (UFO.mine.fullR + UFO.mine.blastR) / 2;
@@ -306,7 +327,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   up("KeyR");
   frame(2);
   const mine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
-  UFO.move(mine.x + 1.0, mine.z);
+  UFO.move(mine.x + 2.0, mine.z);   // close enough to latch, not close enough to trip it
   for (let i = 0; i < 20 && !mine.armed; i++) frame(1);
   UFO.move(mine.x + mid, mine.z);
   let before = UFO.hp;
@@ -344,7 +365,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   const hp0 = UFO.hp;
   const k0 = UFO.kills;
   const mine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
-  UFO.move(mine.x + 1.0, mine.z);
+  UFO.move(mine.x + 2.0, mine.z);   // close enough to latch, not close enough to trip it
   UFO.aim(mine.x, mine.z);
   for (let i = 0; i < 20 && !mine.armed; i++) frame(1);
   ok(mine.armed, "it arms when you get close");
@@ -396,7 +417,7 @@ ok(!UFO.stuck, "player starts outside the walls");
   frame(2);
   a.clear();
   const loudMine = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
-  UFO.move(loudMine.x + 1, loudMine.z);
+  UFO.move(loudMine.x + 2, loudMine.z);
   for (let i = 0; i < 30 && !loudMine.armed; i++) frame(1);
   ok(a.log.includes("mineArm"), "arming a mine asks for the latch");
   for (let i = 0; i < 200 && !loudMine.dead; i++) frame(1);

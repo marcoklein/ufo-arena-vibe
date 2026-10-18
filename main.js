@@ -26,12 +26,15 @@ const NOSE = 1.5;        // muzzle offset from the craft centre
 const ENEMY_R = 1.05;
 const TOUCH_DMG = 12;      // a spitter brushing past you
 
-/* the red diamonds are floating mines. They latch on when they reach you, then
-   swell up and blink for a moment before going off, so there is a window to back
-   away. Point blank costs a fifth of the bar; the price falls off with distance,
-   and outside blastR it costs nothing at all. */
+/* the red diamonds are floating mines. Touching one latches it on, and then it
+   swells and blinks for a moment before going off, so there is a window to back
+   away. Sitting right on top of one is another matter: that goes off where it
+   stands, so you cannot simply drive through it. Point blank costs a fifth of
+   the bar; the price falls off with distance, and outside blastR it costs
+   nothing at all. */
 const MINE = {
   fuse: 1.4,             // seconds of "get out of here" once it has latched on
+  tripR: 1.2,            // this close to the middle and it does not wait
   fullR: 2.6,            // inside this you eat the whole fifth
   blastR: 7.5,           // outside this you eat nothing
   dmg: PLAYER_HP * 0.2,
@@ -2160,6 +2163,12 @@ function stepMine(e, dt) {
   e.t += dt;
   e.hitT = Math.max(0, e.hitT - dt);
   e.wanderT += dt;
+
+  // right over the middle of it: no fuse, no driving through
+  if (d < MINE.tripR) {
+    detonateMine(e);
+    return;
+  }
 
   if (e.armed) {
     // planted, swelling, blinking: the fuse is the whole point

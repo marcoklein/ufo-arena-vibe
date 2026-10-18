@@ -243,7 +243,7 @@
         const m = UFO.enemies.find((e) => !e.dead && e.type === "grunt");
         if (m) {
           mine.hpBefore = UFO.hp;
-          UFO.move(m.x + 1, m.z);
+          UFO.move(m.x + 2, m.z);
           for (let i = 0; i < 30 && !m.armed; i++) await frames(1);
           mine.armed = m.armed;
           mine.fuse = +m.fuse.toFixed(2);
