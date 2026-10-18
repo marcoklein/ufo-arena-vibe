@@ -61,6 +61,13 @@ columns. It swings from one extreme to the other deterministically per level, so
 some levels are wide open and some are a canyon of walls to thread. The first two
 stay open.
 
+And some levels are a *place* rather than a bigger number (see the gameplay
+section): the floor taken away, a warren of small cells, every corridor roofed in,
+all the hunters in one hall, or a blackout. `warren` and `roofed` are the two
+options the maze module takes for those (a warren is carved from 4-5 cell rooms,
+a roofed level puts a tunnel over every corridor cell and cuts no corridor holes,
+because there is nothing left to roof one with).
+
 The first two levels are built with two rooms and nothing else, so the first
 lesson has nowhere to hide.
 
@@ -76,6 +83,17 @@ truncated or hand-edited reads as an empty save rather than throwing mid-level.
 
 `test.mjs` checks the parsing, that `best` only ever goes up (and that the score
 that set it travels with it), the store round trip, and both refusal paths.
+
+### Monsters never change — a rule
+
+A monster type has one set of numbers, in `ENEMY_SPEC`, and no level may touch it:
+the same hit points, speed, rate of fire, damage and knock wherever it turns up,
+and the same on level 18 as on level 1. What a level decides is *where* things
+stand and how many there are. A warden that hits you gently on one level is not a
+thing that can exist - what you learn about a monster has to hold everywhere. The
+Node gameplay test walks every type over fifteen levels and checks that all of them
+report one and the same stat line, and that the roles (a guard holding a post, a
+spitter rooted on a block) change placement only.
 
 ## 2. Gameplay in Node — `smoke/run.mjs`
 
@@ -102,7 +120,11 @@ ladder (level 1 is six red diamonds in two rooms, 2 adds spitters, 3 the shade, 
 the lift and a pad where you start, 5 a single spawner standing between the craft
 and the exit, 6 the warden with the floor taken away - ten wardens on the road, no
 floor monsters, no spawners, a pad to get up and a road of blocks from the start to
-the exit),
+the exit), walks the places (7 a warren of small cells, 8 roofed in over every
+corridor with the level above solid and the floor open, 9 an arena with every
+hunter in one hall and the rest of the level empty, 10 a blackout with a weaker,
+shorter lamp and nearer fog, and 11 and 13 showing that the places come round
+again deeper in),
 drives onto a hole and checks the same meter holds it up on the floor as one level
 up and that running dry drops it out of the world, flies out over the rim of the
 map and checks there is no way back, checks that a tunnel is open underneath and
@@ -200,6 +222,16 @@ its rooms from two or three themes rather than all six, so one level is a green
 level, the next is ember and the one after is louder than both. It is a fixed cycle
 from level 3 on (levels 1 and 2 keep the plain slate look), so consecutive levels
 never share one, and it is deterministic: a level number always looks the same.
+Each palette also picks what sits on top of the rock - a full glowing cap of trim,
+a thin rim, or nothing at all - because a bright little square on every single wall
+cell is one look, not every look.
+
+The craft's lamp holds its brightness and stops at its reach rather than falling
+off with distance: a light bright enough to reach across a room is about twenty
+times brighter three units away, which is what used to paint every flat top white.
+The sky the metals reflect is dim, and a place can turn the lamp down further (the
+blackout level is the palette with the lamp halved and the fog pulled in). The probe
+reports `place` and `lamp` (intensity, reach, fog).
 
 ## 5. Sound — `smoke/audio.mjs` (+ `smoke/audio.html`)
 
@@ -285,6 +317,8 @@ UFO.ladder, UFO.tip, UFO.controlsHint
 UFO.riftsOpened, UFO.riftsClosed   // how many tears have opened and been torn down
 UFO.shot(kind, x, z, vx, vz, level)  // put a shot in the air where a test wants one
 UFO.startCell                   // the cell the run starts on
+UFO.place                       // which place this level is, if it is one
+UFO.lamp                        // what the level's light is doing (intensity, reach, fog)
 UFO.start(n)                    // jump straight to a level, past the menu (the tests use this)
 UFO.save, UFO.inMenu, UFO.menuChoice, UFO.toMenu(), UFO.choose(n)   // saved progress
 UFO.cam(x, y, z, tx, ty, tz)    // test-only camera override for a still, UFO.camOff()

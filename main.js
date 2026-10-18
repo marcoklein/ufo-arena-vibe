@@ -57,7 +57,7 @@ const LURK = {
   dashTime: 0.8,     // a straight line: sidestep and it slams into a wall
   recover: 0.95,     // ...which leaves it open for a moment
   radius: 1.35,
-  hp: (n) => 9 + n * 2,
+  hp: 15,
 };
 
 /* rifts: standing tears in the level that keep producing monsters. They are not
@@ -134,8 +134,7 @@ const allow = (thing, n) => n >= UNLOCK[thing];
    A road of blocks is the only way across, so nothing walks down there and there
    is nothing to send after you - what is up on the blocks is the whole level, and
    it is wardens. It is the level that says what the level above is for. */
-const VOID_LEVEL = UNLOCK.warden;
-const isVoid = (n) => n === VOID_LEVEL;
+const isVoid = (n) => levelPlace(n) === "void";
 
 // The first two levels are little more than a room each: nowhere to hide, nothing
 // but the one new thing to work out. Then the size climbs to a ceiling and stays
@@ -161,6 +160,34 @@ const levelTowerness = (n) => {
 // garrison, so rushing it is not a free ride
 const levelDeckers = (n) => (allow("warden", n) ? (isVoid(n) ? 2 : Math.min(6, 1 + Math.floor((n - 6) / 2))) : 0);
 
+/* -------------------------------------------------------------- the places */
+// Not every level is a bigger version of the last one. Some are a *place*: the
+// floor is gone, or the map is a warren of small cells, or every corridor is
+// roofed in, or everything that hunts is in one hall, or the lamp barely reaches.
+// The counts still climb with the level, but the level you are standing in keeps
+// changing, so a run is not one long ramp - and the monsters never change at all,
+// only where they are put.
+//
+// Level 6 introduces the wardens with the floor taken away; 7 to 10 are one place
+// each; from 11 on the places cycle, so every five levels the ground changes under
+// you again.
+const PLACE_CYCLE = ["warren", "tunnels", "arena", "blackout", "void"];
+const PLACES = {
+  warren: { tip: "THE WARREN: tight cells, no halls, and they are already in there with you." },
+  tunnels: { tip: "ROOFED IN: the level above is closed over every corridor. This one is fought on the floor." },
+  arena: { tip: "THE ARENA: the hunters are all in one big hall, and the rest of the level is empty." },
+  blackout: { tip: "BLACKOUT: the lamp barely reaches. Drive by memory.", dark: 0.5 },
+  void: { tip: "THE FLOOR IS GONE: cross on the blocks, and shoot the globs out of the air." },
+};
+function levelPlace(n) {
+  if (n < UNLOCK.warden) return "none";
+  if (n === UNLOCK.warden) return "void";
+  if (n <= UNLOCK.warden + PLACE_CYCLE.length - 1) return PLACE_CYCLE[n - UNLOCK.warden - 1];
+  return PLACE_CYCLE[(n - UNLOCK.warden - 1) % PLACE_CYCLE.length];
+}
+let place = "none";
+const placeOf = () => PLACES[place] || null;
+
 /* ------------------------------------------------------------ the palette */
 // One look per level, and no two levels in a row look alike. The rock, the level
 // above, the glowing trim, the floor light, the fog and the tower lights all move
@@ -176,43 +203,43 @@ const PALETTES = [
     id: "slate", rock: 0x3f4d61, tower: 0x2f6b70, monolith: 0x3a4762, block: 0x7a4f3a,
     border: 0x33415a, trim: 0x49b8ff, trimWarm: 0xffa53d, fog: 0x02040a, floor: 0x9fb3c8,
     ambient: 0x1a2636, lamp: 0xffe4bc, mast: 0x8fa3bb, tip: 0xff9a6b,
-    shade: 0.85, lampPower: 135, themes: [0, 2],
+    crown: "rim", shade: 0.85, lampPower: 1, themes: [0, 2],
   },
   {
     id: "moss", rock: 0x33503f, tower: 0x2c6b52, monolith: 0x2f4a3a, block: 0x5e6b32,
     border: 0x2b4032, trim: 0x76ff9a, trimWarm: 0xd6ff6a, fog: 0x020806, floor: 0x9dc2a6,
     ambient: 0x16281c, lamp: 0xfff0c8, mast: 0x7fa88c, tip: 0xb6ffc8,
-    shade: 0.8, lampPower: 130, themes: [3, 5, 0],
+    crown: "none", shade: 0.8, lampPower: 0.95, themes: [3, 5, 0],
   },
   {
     id: "ember", rock: 0x5a3a30, tower: 0x7a4a26, monolith: 0x4a3226, block: 0x8a5230,
     border: 0x462e26, trim: 0xff7a2f, trimWarm: 0xffc06a, fog: 0x0a0402, floor: 0xc4a488,
     ambient: 0x2a1a12, lamp: 0xffd9a0, mast: 0xb08a6a, tip: 0xffb066,
-    shade: 0.82, lampPower: 126, themes: [1, 5],
+    crown: "cap", shade: 0.82, lampPower: 0.9, themes: [1, 5],
   },
   {
     id: "frost", rock: 0x3d5c6b, tower: 0x2f7f92, monolith: 0x35576b, block: 0x4a6a80,
     border: 0x34525f, trim: 0x9fe8ff, trimWarm: 0xbfe9ff, fog: 0x02070c, floor: 0xc3dbe8,
     ambient: 0x18283a, lamp: 0xe8f4ff, mast: 0x9fc4d6, tip: 0xd8f6ff,
-    shade: 0.92, lampPower: 126, themes: [2, 0],
+    crown: "rim", shade: 0.92, lampPower: 0.9, themes: [2, 0],
   },
   {
     id: "violet", rock: 0x473d68, tower: 0x5a3f8f, monolith: 0x3f3560, block: 0x6a4a86,
     border: 0x392f56, trim: 0xa98bff, trimWarm: 0xff8bd0, fog: 0x050210, floor: 0xb9acd6,
     ambient: 0x1e1830, lamp: 0xf0e4ff, mast: 0x9d8ec4, tip: 0xd8c8ff,
-    shade: 0.86, lampPower: 135, themes: [4, 0],
+    crown: "cap", shade: 0.86, lampPower: 1, themes: [4, 0],
   },
   {
     id: "toxic", rock: 0x36543c, tower: 0x4a6b2a, monolith: 0x2f4a2f, block: 0x6b7a2f,
     border: 0x2c4430, trim: 0xbaff5e, trimWarm: 0xffe14d, fog: 0x040802, floor: 0xb8d296,
     ambient: 0x1a2414, lamp: 0xf6ffd0, mast: 0x93a878, tip: 0xe6ff8a,
-    shade: 0.82, lampPower: 130, themes: [3, 1],
+    crown: "none", shade: 0.82, lampPower: 0.95, themes: [3, 1],
   },
   {
     id: "candy", rock: 0x3c4f74, tower: 0x2f8fa8, monolith: 0x463a72, block: 0x8a4a6a,
     border: 0x35446b, trim: 0x63f5ff, trimWarm: 0xff7ac8, fog: 0x04030c, floor: 0xc4bde8,
     ambient: 0x1c1a34, lamp: 0xffe8f6, mast: 0x9a9cc8, tip: 0xffa8e8,
-    shade: 0.9, lampPower: 126, themes: [0, 4, 1],
+    crown: "cap", shade: 0.9, lampPower: 0.9, themes: [0, 4, 1],
   },
 ];
 // The first two levels keep the plain slate look - that is where you are learning
@@ -238,11 +265,17 @@ const themeAt = (t) => (t === undefined || t === null ? undefined : themeMap[t %
 /* everything about the palette that is not per-cell: the fog, the sky, the floor,
    the craft's own lamp, and the shared materials the level is built from */
 function applyPalette() {
+  // a place can be darker than its palette: the blackout level is the palette with
+  // the lamp turned down and the fog pulled in, so you see a bubble and nothing else
+  const dark = placeOf() && placeOf().dark ? placeOf().dark : 1;
   scene.fog.color.setHex(palette.fog);
   scene.background.setHex(palette.fog);
+  scene.fog.near = 26 * (dark < 1 ? 0.5 : 1);
+  scene.fog.far = 110 * (dark < 1 ? 0.5 : 1);
   ambientLight.color.setHex(palette.ambient);
   playerLight.color.setHex(palette.lamp);
-  playerLight.intensity = palette.lampPower ?? 150;
+  playerLight.intensity = LAMP.power * (palette.lampPower ?? 1) * dark;
+  playerLight.distance = LAMP.reach * (dark < 1 ? 0.62 : 1);
   floor.material.color.setHex(palette.floor);
   roofMat.color.setHex(palette.rock);
   roofTrimMat.color.setHex(palette.trim);
@@ -411,15 +444,15 @@ function envTexture() {
   const s = 128;
   const { cv, ctx } = makeCanvas(s);
   const g = ctx.createLinearGradient(0, 0, 0, s);
-  g.addColorStop(0, "#22344b");
-  g.addColorStop(0.48, "#101c2b");
-  g.addColorStop(0.55, "#2a3a4e");
+  g.addColorStop(0, "#1b2432");
+  g.addColorStop(0.48, "#0c1621");
+  g.addColorStop(0.55, "#1c2836");
   g.addColorStop(1, "#05080d");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, s, s);
   for (const [x, y, r, c] of [[0.28, 0.2, 30, "255,226,180"], [0.72, 0.32, 24, "120,214,255"]]) {
     const rg = ctx.createRadialGradient(s * x, s * y, 0, s * x, s * y, r);
-    rg.addColorStop(0, `rgba(${c},0.85)`);
+    rg.addColorStop(0, `rgba(${c},0.7)`);
     rg.addColorStop(1, `rgba(${c},0)`);
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, s, s);
@@ -484,24 +517,31 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 // just over 1: with the craft's own lamp this close to the rock, a hotter
 // exposure turns every flat top into snow
-renderer.toneMappingExposure = 1.02;
+renderer.toneMappingExposure = 0.96;
 document.body.appendChild(renderer.domElement);
 
 // dull reflections for the metalwork; deliberately weak so the gloom survives
 {
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromEquirectangular(envTexture()).texture;
-  scene.environmentIntensity = 0.4;
+  // weak on purpose: this is what the metal reflects, but it is also a soft light
+  // on everything that faces up, and a brighter one paints the block tops white
+  scene.environmentIntensity = 0.32;
   pmrem.dispose();
 }
 
 /* ------------------------------------------------------------------ lights */
-const ambientLight = new THREE.AmbientLight(0x1a2636, 0.14);
+const ambientLight = new THREE.AmbientLight(0x1a2636, 0.22);
 scene.add(ambientLight);
 
-// the craft's lamp: what it reaches is what you see, so it has to be strong -
-// but the falloff is short enough that a block top reads as rock, not as snow
-const playerLight = new THREE.PointLight(0xffe4bc, 150, 190, 1.7);
+// The craft's lamp: what it reaches is what you see. Any real falloff makes a light
+// bright enough to reach across a room about twenty times brighter three units
+// away, and that is what painted every flat top white. So this one does not fall
+// off with distance at all - it holds its brightness and simply stops at its reach,
+// fading out over the last stretch. The near field is stone, the far field is dark,
+// and the bubble is the same brightness all the way through.
+const LAMP = { power: 2.4, reach: 56 };
+const playerLight = new THREE.PointLight(0xffe4bc, LAMP.power, LAMP.reach, 0);
 playerLight.position.set(0, HOVER, 0);
 playerLight.castShadow = true;
 playerLight.shadow.mapSize.set(1024, 1024);
@@ -562,15 +602,24 @@ const wallMat = new THREE.MeshStandardMaterial({
 });
 const crownCoolMat = new THREE.MeshStandardMaterial({ color: CROWN_COOL, emissive: CROWN_COOL, emissiveIntensity: 2.6, roughness: 0.4 });
 const crownWarmMat = new THREE.MeshStandardMaterial({ color: CROWN_WARM, emissive: CROWN_WARM, emissiveIntensity: 2.6, roughness: 0.4 });
-const crownMatCache = new Map([[CROWN_COOL, crownCoolMat], [CROWN_WARM, crownWarmMat]]);
-function crownMaterial(color) {
-  let mat = crownMatCache.get(color);
+const crownMatCache = new Map([[`${CROWN_COOL}:2.6`, crownCoolMat], [`${CROWN_WARM}:2.6`, crownWarmMat]]);
+function crownMaterial(color, glow = 2.6) {
+  const id = `${color}:${glow}`;
+  let mat = crownMatCache.get(id);
   if (!mat) {
-    mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 2.6, roughness: 0.4 });
-    crownMatCache.set(color, mat);
+    mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: glow, roughness: 0.4 });
+    crownMatCache.set(id, mat);
   }
   return mat;
 }
+// the trim on top of the rock, per level: a glowing cap, a thin rim, or nothing.
+// Every wall cell carrying a bright square is a look of its own, and it is not the
+// look of every level.
+const CROWN_STYLE = {
+  cap: { h: 0.3, glow: 2.6 },
+  rim: { h: 0.11, glow: 1.5 },
+  none: null,
+};
 // tower lights, in the level's own colours
 const mastMatCache = new Map();
 function mastMaterial(color) {
@@ -759,8 +808,10 @@ function buildWorld(L) {
   }
 
   /* glowing crown trim — one instanced mesh per colour, so a themed room is
-     outlined in its own colour */
-  {
+     outlined in its own colour. Some levels wear a full cap of it, some only a thin
+     rim, and some none at all: it is a level's own look, not a constant. */
+  const crown = CROWN_STYLE[palette.crown ?? "cap"];
+  if (crown) {
     const groups = new Map(); // colour -> wall keys
     for (const key of L.walls) {
       if (L.wallKind.get(key) === "P") continue; // a hole has no crown to trim
@@ -776,11 +827,15 @@ function buildWorld(L) {
       groups.get(color).push(key);
     }
     const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const p = new THREE.Vector3();
+    const sc = new THREE.Vector3(1, crown.h / 0.3, 1);
     for (const [color, cells] of groups) {
-      const mesh = new THREE.InstancedMesh(crownGeo, crownMaterial(color), cells.length);
+      const mesh = new THREE.InstancedMesh(crownGeo, crownMaterial(color, crown.glow), cells.length);
       cells.forEach((key, i) => {
         const [c, r] = key.split(",").map(Number);
-        m.setPosition(L.cellToWorldX(c), (heights.get(key) ?? WALL_H) + 0.05, L.cellToWorldZ(r));
+        p.set(L.cellToWorldX(c), (heights.get(key) ?? WALL_H) + 0.05, L.cellToWorldZ(r));
+        m.compose(p, q, sc);
         mesh.setMatrixAt(i, m);
       });
       mesh.instanceMatrix.needsUpdate = true;
@@ -1191,6 +1246,8 @@ const ENEMY_SPEC = {
   spitter: { hp: 3, speed: 3.8 },
   warden: { hp: 3, speed: 0 },
 };
+// how often a spitter fires, and how long a warden winds up: the same everywhere
+const SPIT_RATE = 2.4;
 
 /* ------------------------------------------------------------ the spitter */
 // The one that shoots. A mine reads as a mine; this has to read as a *gun*: a
@@ -1397,8 +1454,12 @@ function cellsOfKind(kind) {
   return out;
 }
 
-function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0, deck = false, rate = 0, knock = 0 } = {}) {
-  if (type === "lurker") return spawnShade(x, z, power);
+// Every monster is the same monster on every level: same hit points, same speed,
+// same rate of fire, same knock. The level decides *where* things stand and how
+// many there are, never what they are - so what you learn on one level holds on
+// the next one, and a warden that hits you gently is not a thing that can exist.
+function spawnEnemy(type, x, z, { guard = false, deck = false } = {}) {
+  if (type === "lurker") return spawnShade(x, z);
   const spec = ENEMY_SPEC[type];
   const mine = type === "grunt" ? buildMine(x, z) : null;
   const spitter = type === "spitter" ? buildSpitter() : null;
@@ -1409,20 +1470,17 @@ function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0, deck = fals
   else if (!mine) group.position.set(x, 1.1, z);
   enemyGroup.add(group);
 
-  const hp = spec.hp + Math.floor(power / 3) + hpBonus;
+  const hp = spec.hp;
   return {
     type, group, body, eye, mine, spitter, warden, deck: up && type === "spitter",
     level: up ? 1 : 0,
     state: type === "warden" ? "lurk" : null,
     x, z, hp, maxHp: hp, r: warden ? WARDEN.r : ENEMY_R,
-    speed: spec.speed * (1 + power * 0.05),
+    speed: spec.speed,
     fireT: 1 + decor(),
-    fireRate: Math.max(0.7, 2.4 - power * 0.13),
-    // how long a warden winds up: shorter the deeper the run goes
-    rate: rate || Math.max(1.1, WARDEN.rate - Math.max(0, power - 6) * 0.08),
-    // and how hard its shell throws you (the void level's are gentler: a knock
-    // there is a knock off the road)
-    knock: knock || WARDEN.knock,
+    fireRate: SPIT_RATE,
+    rate: WARDEN.rate,
+    knock: WARDEN.knock,
     hitT: 0,
     recoilT: 0,
     dead: false,
@@ -2201,11 +2259,11 @@ function shadeLook() {
   };
 }
 
-function spawnShade(x, z, power) {
+function spawnShade(x, z) {
   const look = shadeLook();
   look.group.position.set(x, 0.7, z);
   enemyGroup.add(look.group);
-  const hp = LURK.hp(power);
+  const hp = LURK.hp;
   return {
     ...look,
     type: "lurker", group: look.group, level: 0,
@@ -2589,7 +2647,7 @@ function openRift(rf) {
   const power = GAME.level;
   const canSpit = allow("spitter", GAME.level);
   const type = canSpit && decor() < (power < 3 ? 0.12 : 0.4) ? "spitter" : "grunt";
-  const e = spawnEnemy(type, rf.x, rf.z, power);
+  const e = spawnEnemy(type, rf.x, rf.z);
   e.fromRift = true;
   enemies.push(e);
   spawnBurst(rf.x, 1.1, rf.z, BOOM.rift());
@@ -3030,7 +3088,8 @@ function toggleSound() {
 
 function startLevel(n, { record = true } = {}) {
   GAME.level = n;
-  // the level's look, before a single thing is built out of it
+  // the level's place and look, before a single thing is built out of it
+  place = levelPlace(n);
   palette = levelPalette(n);
   themeMap = palette.themes;
   applyPalette();
@@ -3047,9 +3106,11 @@ function startLevel(n, { record = true } = {}) {
     startPad: n === UNLOCK.upper || isVoid(n),
     startDeck: n === UNLOCK.upper || isVoid(n),
     tower: towerness,
-    // the warden level is the level above with the floor taken away: the road of
-    // blocks is the only way from the start room to the exit room
-    voidFloor: isVoid(n),
+    // a place, if this level is one: the void level is the level above with the
+    // floor taken away, a warren is all small cells, a roofed level is all tunnels
+    voidFloor: place === "void",
+    warren: place === "warren",
+    roofed: place === "tunnels",
   });
   buildWorld(level);
   clearEntities();
@@ -3121,10 +3182,18 @@ function startLevel(n, { record = true } = {}) {
     if (spawns.length >= levelEnemies(n)) break;
     spawns = level.openCells.filter(([c, r]) => near(c, r, pos.x, pos.z) > r0);
   }
+  // the arena: every hunter is put in the biggest hall there is, and nowhere else.
+  // Walking round it is a real choice, and so is not going in at all.
+  const inRoom = (room, c, r) =>
+    c >= room.x && c < room.x + room.w && r >= room.y && r < room.y + room.h;
+  const arena = place === "arena"
+    ? level.rooms.slice(1).reduce((best, r) => (!best || r.w * r.h > best.w * best.h ? r : best), null)
+    : null;
+  if (arena) spawns = level.openCells.filter(([c, r]) => inRoom(arena, c, r));
   for (let i = 0; i < levelEnemies(n) && spawns.length; i++) {
     const [c, r] = spawns.splice(Math.floor(rng() * spawns.length), 1)[0];
     const type = canSpit && rng() < 0.38 ? "spitter" : "grunt";
-    enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r), n));
+    enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r)));
   }
 
   /* defenders ringing the exit, so the run cannot simply be walked to the end */
@@ -3137,7 +3206,7 @@ function startLevel(n, { record = true } = {}) {
   for (let i = 0; i < levelGuards(n) && ringCells.length; i++) {
     const [c, r] = ringCells.splice(Math.floor(rng() * ringCells.length), 1)[0];
     const type = canSpit && rng() < 0.4 ? "spitter" : "grunt";
-    enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r), n, { guard: true, hpBonus: 1 }));
+    enemies.push(spawnEnemy(type, level.cellToWorldX(c), level.cellToWorldZ(r), { guard: true }));
   }
 
   /* shades: waiting in the rooms, well away from the start pad and the exit.
@@ -3157,9 +3226,11 @@ function startLevel(n, { record = true } = {}) {
       }
     }
   }
-  for (let i = 0; i < levelLurkers(n) && roomCells.length; i++) {
-    const [c, r] = roomCells.splice(Math.floor(rng() * roomCells.length), 1)[0];
-    enemies.push(spawnShade(level.cellToWorldX(c), level.cellToWorldZ(r), n));
+  // ...and in the arena the shades are in that hall too
+  const shadeCells = arena ? roomCells.filter(([c, r]) => inRoom(arena, c, r)) : roomCells;
+  for (let i = 0; i < levelLurkers(n) && shadeCells.length; i++) {
+    const [c, r] = shadeCells.splice(Math.floor(rng() * shadeCells.length), 1)[0];
+    enemies.push(spawnShade(level.cellToWorldX(c), level.cellToWorldZ(r)));
   }
 
   /* the garrison of the level above: wardens rooted on the raised runs, and
@@ -3179,16 +3250,13 @@ function startLevel(n, { record = true } = {}) {
       spots.push({ x: level.cellToWorldX(c), z: level.cellToWorldZ(r) });
     }
     const take = () => spots.splice(Math.floor(rng() * spots.length), 1)[0];
-    // the void level's wardens are gentler with the knock: on a road with nothing
-    // under it, being thrown off is a fall, not a setback
-    const soft = isVoid(n) ? { knock: 34, rate: 2.6 } : {};
     for (let i = 0; i < levelWardens(n) && spots.length; i++) {
       const spot = take();
-      enemies.push(spawnEnemy("warden", spot.x, spot.z, n, soft));
+      enemies.push(spawnEnemy("warden", spot.x, spot.z));
     }
     for (let i = 0; i < levelDeckers(n) && spots.length; i++) {
       const spot = take();
-      enemies.push(spawnEnemy("spitter", spot.x, spot.z, n, { deck: true }));
+      enemies.push(spawnEnemy("spitter", spot.x, spot.z, { deck: true }));
     }
   }
 
@@ -3205,8 +3273,10 @@ function startLevel(n, { record = true } = {}) {
   gameAudio.music({ level: n, state: "playing" });
   gameAudio.poke(0.45);            // a phrase on arrival, then it waits for you
   if (n > 1) gameAudio.sfx("levelUp");
-  // and one line about whatever has just been introduced, then the controls again
+  // and one line about whatever has just been introduced - or about the place this
+  // level is - then the controls again
   if (ARRIVALS[n]) showTip(ARRIVALS[n]);
+  else if (placeOf() && placeOf().tip) showTip(placeOf().tip);
   else resetTip();
 }
 
@@ -4121,6 +4191,11 @@ globalThis.UFO = {
   get craftVisible() { return ufo.visible; },
   get camPos() { return { x: camera.position.x, y: camera.position.y, z: camera.position.z }; },
   // the dust field, and the bubble kept clear around the craft
+  // what the level's light is doing: a place can turn the lamp down
+  get lamp() {
+    return { intensity: playerLight.intensity, distance: playerLight.distance, fog: scene.fog.far };
+  },
+  get place() { return place; },
   get dust() { return dustGeo.attributes.position.array; },
   get dustBubble() { return { r: DUST_BUBBLE_R, y: DUST_BUBBLE_Y }; },
   get tip() { return { text: el.hint.innerHTML, t: tipT }; },

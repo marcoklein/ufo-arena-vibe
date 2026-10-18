@@ -218,7 +218,8 @@
         await frames(22);
       } else if (pose === "tour") {
         // a wide look over the whole level, for judging a level's palette at a glance
-        UFO.cam(0, 62, 34, 0, 0, 0);
+        // low enough to stay inside the fog, so the palette is what is being judged
+        UFO.cam(0, 24, 20, 0, 0, 2);
         await frames(10);
       } else if (pose === "void") {
         // the void level from above: the road of blocks, and the holes either side
@@ -661,6 +662,8 @@
           startRoom: `${UFO.rooms[0].w}x${UFO.rooms[0].h}`,
           // the start screen and what it remembers between sessions
           menu: UFO.inMenu,
+          place: UFO.place,
+          lamp: UFO.lamp,
           save: UFO.save,
           savedRaw: (() => { try { return localStorage.getItem("ufo-arena.save"); } catch { return "n/a"; } })(),
           menuBtn: document.getElementById("btncont") && document.getElementById("btncont").textContent,

@@ -1122,8 +1122,6 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
   ok(ofType("grunt").length === 0 && UFO.shades.length === 0 &&
     ofType("spitter").every((e) => e.deck), "and nothing walks down there either");
   ok(UFO.wardens.length === 10, `the level above is all wardens (${UFO.wardens.length})`);
-  ok(UFO.wardens.every((w) => w.knock > 0 && w.knock < 40),
-    `posted with a gentler knock, so a hit is not a fall (${UFO.wardens[0] && UFO.wardens[0].knock})`);
 
   // a pad in the room you start in, so the level can be entered at all
   const nearPad = UFO.pads.reduce((b, p) => {
@@ -1172,6 +1170,101 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
       }
     }
   }
+}
+
+/* a monster is the same monster on every level: only where it stands changes */
+{
+  const stats = (e) => [e.hp, e.maxHp, e.speed, e.fireRate, e.rate, e.knock, e.r].join("|");
+  const seen = new Map(); // type -> level -> set of stat lines
+  const levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 18];
+  for (const n of levels) {
+    startL(n);
+    for (const e of UFO.enemies) {
+      if (e.dead) continue;
+      if (!seen.has(e.type)) seen.set(e.type, new Map());
+      const byLevel = seen.get(e.type);
+      if (!byLevel.has(n)) byLevel.set(n, new Set());
+      byLevel.get(n).add(stats(e));
+    }
+  }
+  for (const [type, byLevel] of seen) {
+    const all = new Set([...byLevel.values()].flatMap((v) => [...v]));
+    ok(all.size === 1,
+      `${type}: exactly the same monster on all ${byLevel.size} levels it appears on (${all.size} variant(s): ${[...all][0]})`);
+  }
+  ok(seen.size >= 3, `and there were enough kinds to check (${[...seen.keys()].join(", ")})`);
+  // the role a monster is given is placement, not stats: a guard is the same
+  // creature standing on a post
+  startL(10);
+  const guards = UFO.enemies.filter((e) => e.guard && !e.dead);
+  ok(guards.length > 0 && guards.every((g) => g.leash < 9),
+    `guards hold a post (${guards.length} of them, leash ${guards[0] && guards[0].leash})`);
+}
+
+/* the places: some levels are a place rather than a bigger number */
+{
+  // the warren: a lot of small cells and no halls to hide in
+  startL(7);
+  ok(UFO.place === "warren" && /WARREN/.test(UFO.tip.text), `level 7 is a warren (${UFO.tip.text})`);
+  ok(UFO.rooms.length >= 10, `with a lot of rooms (${UFO.rooms.length})`);
+  {
+    const small = UFO.rooms.filter((r) => r.w <= 6 && r.h <= 6).length;
+    ok(small >= UFO.rooms.length - 2, `and almost all of them small (${small} of ${UFO.rooms.length})`);
+    ok(UFO.monsters > 0 && UFO.rifts.length > 0, "with the usual monsters in it");
+  }
+
+  // roofed in: every corridor is a tunnel, so the level above is closed
+  startL(8);
+  ok(UFO.place === "tunnels" && /ROOFED/.test(UFO.tip.text), `level 8 is roofed in (${UFO.tip.text})`);
+  ok(UFO.roofs.length > 50, `with a roof over the whole corridor network (${UFO.roofs.length} cells)`);
+  ok(UFO.stats.voids === 0, "and no corridor holes: there is nothing to roof one with");
+  {
+    const roof = UFO.roofs[0];
+    const w = UFO.worldOf(roof.col, roof.row);
+    UFO.move(w.x, w.z);
+    frame(2);
+    ok(!UFO.stuckAt(w.x, w.z), "the floor under a roof is open to drive on");
+    ok(UFO.wallTopAt(w.x, w.z) > 4,
+      `and the same spot is solid rock one level up (top at ${UFO.wallTopAt(w.x, w.z).toFixed(1)}u)`);
+  }
+
+  // the arena: everything that hunts is in one hall, and the rest is empty
+  startL(9);
+  ok(UFO.place === "arena" && /ARENA/.test(UFO.tip.text), `level 9 is an arena (${UFO.tip.text})`);
+  {
+    const rooms = UFO.rooms.slice(1);
+    const big = rooms.reduce((b, r) => (!b || r.w * r.h > b.w * b.h ? r : b), null);
+    const corner = (c, r) => UFO.worldOf(c, r);
+    const a = corner(big.x, big.y);
+    const b2 = corner(big.x + big.w - 1, big.y + big.h - 1);
+    const inHall = (e) => e.x > a.x - 2.5 && e.x < b2.x + 2.5 && e.z > a.z - 2.5 && e.z < b2.z + 2.5;
+    // the hunters (guards hold the exit, which is the point of guards)
+    const hunters = UFO.enemies.filter((e) => !e.dead && !e.deck && !e.guard && e.level === 0);
+    const inside = hunters.filter(inHall);
+    ok(hunters.length > 0 && inside.length === hunters.length,
+      `every hunter is in the one big hall (${inside.length} of ${hunters.length})`);
+    ok(UFO.enemies.some((e) => e.guard), "with the usual ring of guards round the exit");
+    ok(big.w >= 7 || big.h >= 7, `and it is a hall, not a cupboard (${big.w}x${big.h})`);
+  }
+
+  // blackout: the same level with the lamp turned down
+  startL(5);
+  const lit = UFO.lamp;
+  startL(10);
+  ok(UFO.place === "blackout" && /BLACKOUT/.test(UFO.tip.text), `level 10 is a blackout (${UFO.tip.text})`);
+  ok(UFO.lamp.intensity < lit.intensity * 0.7,
+    `with a weaker lamp (${UFO.lamp.intensity.toFixed(0)} against ${lit.intensity.toFixed(0)})`);
+  ok(UFO.lamp.distance < lit.distance && UFO.lamp.fog < lit.fog,
+    `and a shorter reach (${UFO.lamp.distance.toFixed(0)}u, fog ${UFO.lamp.fog.toFixed(0)})`);
+  ok(UFO.enemies.length > 0, "the monsters do not care about the dark");
+
+  // and the places come round again deeper in the run
+  startL(11);
+  ok(UFO.place === "void", `level 11 is a void level again (${UFO.place})`);
+  startL(13);
+  ok(UFO.place === "tunnels", `and level 13 is roofed in (${UFO.place})`);
+  startL(6);
+  ok(UFO.place === "void" && UFO.stats.voidFloor === true, "level 6 is still the one that teaches it");
 }
 
 /* the upper level is garrisoned: the things up there only reach their own level */

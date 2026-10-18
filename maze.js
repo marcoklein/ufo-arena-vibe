@@ -57,7 +57,7 @@ function carveV(grid, y1, y2, x, w) {
 // plus a handful of extra links so there is usually more than one way round.
 // Corridors are deliberately a mix of 1 and 2 cells wide, and dead-end stubs
 // are hung off them so the route to the exit is rarely obvious.
-function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
+function generate(cols, rows, rng, maxRooms = 99, tower = 0.35, roomMax = 9) {
   const grid = [];
   for (let r = 0; r < rows; r++) grid.push(new Array(cols).fill("#"));
 
@@ -86,7 +86,7 @@ function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
 
   // on the tiny tutorial levels two rooms have to fit side by side, so the rooms
   // are kept small there instead of one room eating the map
-  const maxRoom = maxRooms <= 3 ? Math.max(4, Math.floor(cols / 3)) : 9;
+  const maxRoom = maxRooms <= 3 ? Math.max(4, Math.floor(cols / 3)) : roomMax;
   for (let i = 0; i < tries && carved < carveBudget; i++) {
     if (rooms.length >= maxRooms) break;
     const w = 4 + Math.floor(rng() * (maxRoom - 3)); // 4..maxRoom cells
@@ -238,7 +238,7 @@ function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
 // Nothing is stamped in the start room, in a corridor, or within one cell of a
 // room's edge. So no doorway is ever pinched, the inside rim of every room stays
 // walkable, and neither a block nor a hole can cut a room in half.
-function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor = false } = {}) {
+function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor = false, roofed = false } = {}) {
   const upper = new Set();   // low blocks: the level above the floor
   const holes = new Set();   // holes in the floor: nothing up there to land on
   const vaults = [];         // courtyards that only open from above
@@ -481,101 +481,108 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor 
   // from the start is recounted after each one and the run is taken back if it cut
   // anything off - so a void is always a shortcut or a risk, never the only road.
   //
-  // A level whose whole floor is a void (see createLevel) has no use for either
-  // of these: there is nothing left to cut, and nothing left to roof over.
+  // A level whose whole floor is a void (see createLevel) has no use for either of
+  // these, and a level that is roofed in has no corridor left to cut a hole in.
   const voids = new Set();
   const roofs = new Set();
   if (!voidFloor) {
-  const startRoom = rooms[0];
-  const rowCount = grid.length;
-  const walkCount = () => {
-    const seen = new Set([`${startRoom.cx},${startRoom.cy}`]);
-    const q = [[startRoom.cx, startRoom.cy]];
-    for (let i = 0; i < q.length; i++) {
-      const [c, r] = q[i];
-      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const cc = c + dc;
-        const rr = r + dr;
-        if (cc < 1 || rr < 1 || cc >= cols - 1 || rr >= rowCount - 1) continue;
-        if (grid[rr][cc] === "#") continue;
-        const k = `${cc},${rr}`;
-        if (seen.has(k)) continue;
-        seen.add(k);
-        q.push([cc, rr]);
+    const startRoom = rooms[0];
+    const rowCount = grid.length;
+    const walkCount = () => {
+      const seen = new Set([`${startRoom.cx},${startRoom.cy}`]);
+      const q = [[startRoom.cx, startRoom.cy]];
+      for (let i = 0; i < q.length; i++) {
+        const [c, r] = q[i];
+        for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const cc = c + dc;
+          const rr = r + dr;
+          if (cc < 1 || rr < 1 || cc >= cols - 1 || rr >= rowCount - 1) continue;
+          if (grid[rr][cc] === "#") continue;
+          const k = `${cc},${rr}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          q.push([cc, rr]);
+        }
+      }
+      return seen;
+    };
+    if (!roofed) {
+      const reach = walkCount();
+      const base = reach.size;
+      const corridor = (c, r) =>
+        grid[r] && grid[r][c] === "." && !roomCells.has(`${c},${r}`);
+      let runs = 0;
+      for (let attempt = 0; attempt < 90 && runs < 4; attempt++) {
+        const c = 2 + Math.floor(rng() * (cols - 4));
+        const r = 2 + Math.floor(rng() * (rowCount - 4));
+        if (!corridor(c, r) || !reach.has(`${c},${r}`)) continue;
+        // a straight run along the corridor, never at a junction or a corner
+        const h = grid[r][c - 1] === "." && grid[r][c + 1] === ".";
+        const v = grid[r - 1] && grid[r - 1][c] === "." && grid[r + 1] && grid[r + 1][c] === ".";
+        if (h === v) continue;
+        const len = 2 + (rng() < 0.35 ? 1 : 0);
+        const cells = [];
+        for (let k = 0; k < len; k++) {
+          const cc = h ? c + k : c;
+          const rr = h ? r : r + k;
+          if (!corridor(cc, rr) || !reach.has(`${cc},${rr}`)) break;
+          cells.push([cc, rr]);
+        }
+        if (cells.length < 2) continue;
+        for (const [cc, rr] of cells) grid[rr][cc] = "#";
+        if (walkCount().size !== base - cells.length) {
+          for (const [cc, rr] of cells) grid[rr][cc] = ".";
+          continue;
+        }
+        for (const [cc, rr] of cells) {
+          const key = `${cc},${rr}`;
+          holes.add(key);
+          voids.add(key);
+        }
+        runs++;
       }
     }
-    return seen;
-  };
-  {
-    const reach = walkCount();
-    const base = reach.size;
-    const corridor = (c, r) =>
-      grid[r] && grid[r][c] === "." && !roomCells.has(`${c},${r}`);
-    let runs = 0;
-    for (let attempt = 0; attempt < 90 && runs < 4; attempt++) {
-      const c = 2 + Math.floor(rng() * (cols - 4));
-      const r = 2 + Math.floor(rng() * (rowCount - 4));
-      if (!corridor(c, r) || !reach.has(`${c},${r}`)) continue;
-      // a straight run along the corridor, never at a junction or a corner
-      const h = grid[r][c - 1] === "." && grid[r][c + 1] === ".";
-      const v = grid[r - 1] && grid[r - 1][c] === "." && grid[r + 1] && grid[r + 1][c] === ".";
-      if (h === v) continue;
-      const len = 2 + (rng() < 0.35 ? 1 : 0);
-      const cells = [];
-      for (let k = 0; k < len; k++) {
-        const cc = h ? c + k : c;
-        const rr = h ? r : r + k;
-        if (!corridor(cc, rr) || !reach.has(`${cc},${rr}`)) break;
-        cells.push([cc, rr]);
-      }
-      if (cells.length < 2) continue;
-      for (const [cc, rr] of cells) grid[rr][cc] = "#";
-      if (walkCount().size !== base - cells.length) {
-        for (const [cc, rr] of cells) grid[rr][cc] = ".";
-        continue;
-      }
-      for (const [cc, rr] of cells) {
-        const key = `${cc},${rr}`;
-        holes.add(key);
-        voids.add(key);
-      }
-      runs++;
-    }
-  }
 
-  /* ----------------------------------------------------------- the tunnels */
-  // A roof over a corridor. Nothing changes on the floor - you drive under it,
-  // and so does everything that walks - but one level up it is solid rock. So the
-  // level above is not a free flight path over the whole map: there are places
-  // where the only way on is down, out from under the roof, and back up on the
-  // other side (or round, on the floor).
-  {
+    /* ----------------------------------------------------------- the tunnels */
+    // A roof over a corridor. Nothing changes on the floor - you drive under it,
+    // and so does everything that walks - but one level up it is solid rock. So the
+    // level above is not a free flight path over the whole map: there are places
+    // where the only way on is down, out from under the roof, and back up on the
+    // other side (or round, on the floor).
     const corridor = (c, r) => grid[r] && grid[r][c] === "." && !roomCells.has(`${c},${r}`);
-    const wantRoofs = Math.max(2, Math.min(8, Math.floor(cols / 5)));
-    let runs = 0;
-    for (let attempt = 0; attempt < 140 && runs < wantRoofs; attempt++) {
-      const c = 2 + Math.floor(rng() * (cols - 4));
-      const r = 2 + Math.floor(rng() * (rowCount - 4));
-      if (!corridor(c, r)) continue;
-      const h = grid[r][c - 1] === "." && grid[r][c + 1] === ".";
-      const v = grid[r - 1] && grid[r - 1][c] === "." && grid[r + 1] && grid[r + 1][c] === ".";
-      if (h === v) continue;                 // junctions and corners are not tunnels
-      if (holes.has(`${c},${r}`)) continue;  // nothing to roof over a hole
-      const len = 2 + (rng() < 0.4 ? 1 : 0);
-      const cells = [];
-      for (let k = 0; k < len; k++) {
-        const cc = h ? c + k : c;
-        const rr = h ? r : r + k;
-        if (!corridor(cc, rr) || holes.has(`${cc},${rr}`)) break;
-        if (roofs.has(`${cc},${rr}`)) break;
-        cells.push([cc, rr]);
+    if (roofed) {
+      // a level that is roofed in: *every* corridor is a tunnel, so the level above
+      // is closed over the whole network and the floor is the only way between the
+      // rooms. The rooms themselves stay open, which is where the two levels meet.
+      for (let r = 1; r < rowCount - 1; r++) {
+        for (let c = 1; c < cols - 1; c++) if (corridor(c, r)) roofs.add(`${c},${r}`);
       }
-      if (cells.length < 2) continue;
-      for (const [cc, rr] of cells) roofs.add(`${cc},${rr}`);
-      runs++;
+    } else {
+      const wantRoofs = Math.max(2, Math.min(8, Math.floor(cols / 5)));
+      let runs = 0;
+      for (let attempt = 0; attempt < 140 && runs < wantRoofs; attempt++) {
+        const c = 2 + Math.floor(rng() * (cols - 4));
+        const r = 2 + Math.floor(rng() * (rowCount - 4));
+        if (!corridor(c, r)) continue;
+        const h = grid[r][c - 1] === "." && grid[r][c + 1] === ".";
+        const v = grid[r - 1] && grid[r - 1][c] === "." && grid[r + 1] && grid[r + 1][c] === ".";
+        if (h === v) continue;                 // junctions and corners are not tunnels
+        if (holes.has(`${c},${r}`)) continue;  // nothing to roof over a hole
+        const len = 2 + (rng() < 0.4 ? 1 : 0);
+        const cells = [];
+        for (let k = 0; k < len; k++) {
+          const cc = h ? c + k : c;
+          const rr = h ? r : r + k;
+          if (!corridor(cc, rr) || holes.has(`${cc},${rr}`)) break;
+          if (roofs.has(`${cc},${rr}`)) break;
+          cells.push([cc, rr]);
+        }
+        if (cells.length < 2) continue;
+        for (const [cc, rr] of cells) roofs.add(`${cc},${rr}`);
+        runs++;
+      }
     }
   }
-  } // not a void floor: the tunnels and the corridor voids are only for levels with a floor
 
   return { upper, holes, vaults, vaultRings, voids, roofs };
 }
@@ -584,13 +591,14 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor 
 export function createLevel({
   cols = 25, rows = 25, seed = 1, liftCount = 2, upper: wantUpper = true, rooms: maxRooms = 99,
   startPad = false, startDeck = false, tower = 0.35, voidFloor = false,
+  roofed = false, warren = false,
 } = {}) {
   const rng = makeRng(seed);
-  const { grid, rooms, stats } = generate(cols, rows, rng, maxRooms, tower);
+  const { grid, rooms, stats } = generate(cols, rows, rng, maxRooms, tower, warren ? 5 : 9);
   // the level above the floor, and the holes in it. Levels before the lift is
   // introduced are built without any of it.
   const built = wantUpper
-    ? stampUpperLevel(grid, rooms, cols, rng, { startDeck, voidFloor })
+    ? stampUpperLevel(grid, rooms, cols, rng, { startDeck, voidFloor, roofed })
     : { upper: new Set(), holes: new Set(), vaults: [], vaultRings: new Set(), voids: new Set(), roofs: new Set() };
   const upper = built.upper;
   const pits = built.holes;
