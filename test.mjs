@@ -1,5 +1,8 @@
 // Node test for the maze/level module. Run: node test.mjs
 import { CELL, RADIUS, COLL, createLevel } from "./maze.js";
+import {
+  SAVE_KEY, SAVE_VERSION, blank, memoryStore, parseSave, pickStore, readSave, reachLevel, writeSave,
+} from "./save.js";
 
 let failures = 0;
 const ok = (cond, msg) => { console.log((cond ? "  PASS " : "  FAIL ") + msg); if (!cond) failures++; };
@@ -359,6 +362,133 @@ for (const [lvl, cols, rows, count] of [[1, 25, 25, 2], [3, 29, 29, 3], [8, 39, 
     ok(plain.every(({ col, row }) => seen.has(`${col},${row}`)), `L${lvl}: every pad can be driven to`);
     const toExit = Math.min(...plain.map(({ col, row }) => Math.abs(col - L.exit.col) + Math.abs(row - L.exit.row)));
     ok(toExit <= 8, `L${lvl}: one pad is a short run from the exit (${toExit} cells)`);
+  }
+}
+
+/* the save: what is kept between sessions, and what a broken one reads as */
+{
+  ok(SAVE_VERSION >= 1 && SAVE_KEY.startsWith("ufo-arena"), `the save has a key and a version (${SAVE_KEY} v${SAVE_VERSION})`);
+  const empty = blank();
+  ok(empty.best === 0 && empty.last === 0 && empty.kills === 0, "an empty save remembers nothing");
+
+  // anything unreadable reads as empty rather than throwing mid-transition
+  ok(parseSave(null).best === 0 && parseSave("").best === 0, "no save reads as empty");
+  ok(parseSave("{not json").best === 0, "a truncated save reads as empty");
+  ok(parseSave("[1,2,3]").best === 0, "and so does the wrong shape entirely");
+  ok(parseSave(JSON.stringify({ best: -5, last: "x", kills: null })).best === 0,
+    "and nonsense values are dropped");
+  ok(parseSave(JSON.stringify({ version: 99, best: 4.7, last: 2.2, kills: 8.9 })).best === 4,
+    "while real numbers are floored and kept");
+
+  // the best only ever goes up, and the score that set it goes with it
+  let s = blank();
+  s = reachLevel(s, 3, 11);
+  ok(s.best === 3 && s.last === 3 && s.kills === 11, `reaching level 3 records it (${JSON.stringify(s)})`);
+  s = reachLevel(s, 2, 40);
+  ok(s.best === 3 && s.kills === 11, "going back down a level does not lower the best, or its score");
+  ok(s.last === 2, "but the level last played moves with you");
+  s = reachLevel(s, 9, 40);
+  ok(s.best === 9 && s.kills === 40, "reaching deeper replaces both");
+  ok(reachLevel(s, 0, 0).best === 9, "and a level 0 cannot wipe it");
+
+  // round trip through a store
+  const store = memoryStore();
+  writeSave(store, s);
+  const back = readSave(store);
+  ok(JSON.stringify(back) === JSON.stringify(s), `a save survives a store round trip (${JSON.stringify(back)})`);
+  store.setItem(SAVE_KEY, "garbage");
+  ok(readSave(store).best === 0, "and a corrupted entry is survivable");
+
+  // a browser with no storage (private mode) still gets a working game
+  const shim = pickStore({ get localStorage() { throw new Error("blocked"); } });
+  ok(typeof shim.getItem === "function" && typeof shim.setItem === "function",
+    "a browser that refuses storage falls back to memory");
+  writeSave(shim, s);
+  ok(readSave(shim).best === 9, "which still holds a save for this session");
+  const refusing = {
+    getItem: () => null,
+    setItem() { throw new Error("quota"); },
+    removeItem() {},
+  };
+  ok(writeSave(refusing, s).best === 9, "and a store that refuses writes does not break the game");
+}
+
+/* the void floor: one level's floor is gone, and the level above is the road */
+{
+  // the walk on the floor from a cell, over the floor as it stands
+  const floorWalk = (L, from) => {
+    const seen = new Set([`${from.col},${from.row}`]);
+    const q = [[from.col, from.row]];
+    for (let i = 0; i < q.length; i++) {
+      const [c, r] = q[i];
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const cc = c + dc;
+        const rr = r + dr;
+        const k = `${cc},${rr}`;
+        if (cc < 1 || rr < 1 || cc >= L.cols - 1 || rr >= L.rows - 1) continue;
+        if (L.walls.has(k) || L.pits.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        q.push([cc, rr]);
+      }
+    }
+    return seen;
+  };
+  const inRoom = (k, room) => {
+    const [c, r] = k.split(",").map(Number);
+    return c >= room.x && c < room.x + room.w && r >= room.y && r < room.y + room.h;
+  };
+  // is there a run of raised cells joining the start cell to the exit cell?
+  const roadJoins = (L) => {
+    const key = (c, r) => `${c},${r}`;
+    const around = (c, r) => [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dc, dr]) => key(c + dc, r + dr));
+    const seeds = around(L.start.col, L.start.row).filter((k) => L.upper.has(k));
+    const goals = new Set(around(L.exit.col, L.exit.row).filter((k) => L.upper.has(k)));
+    const seen = new Set(seeds);
+    const q = [...seeds];
+    for (let i = 0; i < q.length; i++) {
+      const [c, r] = q[i].split(",").map(Number);
+      for (const k of around(c, r)) {
+        if (!L.upper.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        q.push(k);
+      }
+    }
+    return { seeds, joined: [...goals].some((k) => seen.has(k)), count: seen.size };
+  };
+
+  for (const seed of [1006, 1007, 1008]) {
+    const cols = 27;
+    const rows = 27;
+    const L = createLevel({
+      cols, rows, seed, liftCount: 3, upper: true, startPad: true, startDeck: true,
+      tower: 0.5, voidFloor: true,
+    });
+    ok(L.stats.voidFloor === true, `V${seed}: the level knows its floor is a void`);
+    ok(L.vaults.length === 0, `V${seed}: no courtyard is cut into a floorless level`);
+    ok(L.roofs.size === 0 && L.stats.voids === 0, `V${seed}: and nothing is roofed over or cut off`);
+    ok(!L.pits.has(`${L.start.col},${L.start.row}`) && !L.walls.has(`${L.start.col},${L.start.row}`),
+      `V${seed}: the craft has ground to start on`);
+    ok(!L.pits.has(`${L.exit.col},${L.exit.row}`) && !L.walls.has(`${L.exit.col},${L.exit.row}`),
+      `V${seed}: and the exit has ground to land on`);
+    // the floor that is left is the start room and the exit room, and nothing else
+    const walk = floorWalk(L, L.start);
+    ok([...walk].every((k) => inRoom(k, L.rooms[0])),
+      `V${seed}: the floor walk never leaves the start room (${walk.size} cells)`);
+    ok(L.openCells.length < cols * rows * 0.3,
+      `V${seed}: most of the map is a hole (${L.openCells.length} floor cells left)`);
+    const road = roadJoins(L);
+    ok(road.seeds.length > 0 && road.joined,
+      `V${seed}: the raised road runs from the start to the exit (${road.count} cells joined)`);
+    ok(L.stats.road >= 20, `V${seed}: and it is a real road, not a stepping stone (${L.stats.road} cells)`);
+    // a pad in the room you start in: the only way up, so it must exist
+    const inStartRoom = L.lifts.filter((l) => {
+      const x = L.cellToWorldX(l.col);
+      const z = L.cellToWorldZ(l.row);
+      return Math.hypot(x - L.cellToWorldX(L.start.col), z - L.cellToWorldZ(L.start.row)) < 26;
+    });
+    ok(inStartRoom.length > 0, `V${seed}: with a pad within reach of the start (${inStartRoom.length})`);
+    ok(inStartRoom.every((l) => !L.pits.has(`${l.col},${l.row}`) && !L.walls.has(`${l.col},${l.row}`)),
+      `V${seed}: standing on real floor`);
   }
 }
 

@@ -24,14 +24,25 @@ function stubEl(id) {
     textContent: "",
     innerHTML: "",
     style: {},
+    _on: {},
+    addEventListener(type, fn) { this._on[type] = fn; },
+    click() { if (this._on.click) this._on.click({ preventDefault() {} }); },
     classList: {
       _s: new Set(),
-      add(c) { this._s.add(c); },
-      remove(c) { this._s.delete(c); },
+      add(...cs) { for (const c of cs) this._s.add(c); },
+      remove(...cs) { for (const c of cs) this._s.delete(c); },
       contains(c) { return this._s.has(c); },
     },
   };
 }
+
+// the browser storage the save lives in, so the start screen can be driven here
+const store = new Map();
+globalThis.localStorage = {
+  getItem: (k) => (store.has(k) ? store.get(k) : null),
+  setItem: (k, v) => { store.set(k, String(v)); },
+  removeItem: (k) => { store.delete(k); },
+};
 
 let fullscreenEl = null;
 globalThis.document = {
@@ -111,6 +122,19 @@ ok(typeof HARNESS.loop === "function", "animation loop registered");
 ok(HARNESS.frames > 0 || true, "renderer constructed");
 
 frame(2);
+// the start screen is the first thing on screen, with nothing saved yet
+ok(UFO.inMenu, "boots on the start screen");
+ok(UFO.state === "menu", `and holds there until a level is picked (${UFO.state})`);
+ok(els.ovtitle.textContent === "UFO ARENA", `titled ${els.ovtitle.textContent}`);
+ok(/Start/.test(els.btncont.innerHTML) && /1/.test(els.btncont.innerHTML),
+  `offering a start at level 1 (${els.btncont.innerHTML})`);
+ok(els.btnnew.style.display === "none", "and nothing to continue when there is no save");
+ok(els.overlay.classList.contains("menu"), "with the menu buttons up");
+els.btncont.click(); // the mouse works on the one screen that is not a keyboard game
+frame(2);
+ok(UFO.state === "playing" && UFO.level === 1, "and the button starts level 1");
+ok(!els.overlay.classList.contains("show"), "with the start screen out of the way");
+
 const START = { x: UFO.pos.x, z: UFO.pos.z };
 ok(UFO.level === 1, `boots on level 1 (got ${UFO.level})`);
 ok(UFO.state === "playing", "boots in the playing state");
@@ -121,6 +145,64 @@ ok(UFO.rooms[0].w >= 8 && UFO.rooms[0].h >= 8,
   `and in a room big enough for the camera (${UFO.rooms[0].w}x${UFO.rooms[0].h})`);
 ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
   `the edge of the map is a band of nothing (${UFO.rim.length} cells), not a wall`);
+
+/* the save: the deepest level reached, and picking where to start */
+{
+  // playing a level writes it, and the best only ever goes up
+  startL(3);
+  ok(UFO.save.best === 3, `reaching level 3 records it (${UFO.save.best})`);
+  ok(JSON.parse(globalThis.localStorage.getItem("ufo-arena.save")).best === 3,
+    "and it is in the browser's own storage");
+  startL(2);
+  ok(UFO.save.best === 3, `dropping back to level 2 does not lower the best (${UFO.save.best})`);
+  ok(UFO.save.last === 2, `but the level last played is remembered (${UFO.save.last})`);
+
+  // the kills that set the record are kept with it
+  startL(1);
+  UFO.kill();
+  const kills = UFO.kills;
+  ok(kills > 0, `a run scores its kills (${kills})`);
+  startL(4);
+  ok(UFO.save.best === 4 && UFO.save.kills === kills,
+    `and the record keeps the score that got there (level ${UFO.save.best}, ${UFO.save.kills} kills)`);
+
+  // the start screen offers both ways in
+  UFO.toMenu();
+  ok(UFO.inMenu, "the start screen can be called up again");
+  ok(UFO.menuChoice === 4, `and it offers the deepest level reached (${UFO.menuChoice})`);
+  ok(/Continue/.test(els.btncont.innerHTML), `as "Continue" (${els.btncont.innerHTML})`);
+  ok(els.btnnew.style.display !== "none", "with a new game beside it");
+  ok(/Best level reached/.test(els.ovsub.innerHTML) && /4/.test(els.ovsub.innerHTML),
+    `and it says what is saved (${els.ovsub.innerHTML})`);
+
+  // Enter carries on where you got to
+  down("Enter");
+  up("Enter");
+  ok(UFO.state === "playing" && UFO.level === 4, `Enter carries on at level ${UFO.level}`);
+  ok(UFO.kills === 0, "with a fresh score for the new run");
+
+  // ...and New game starts over without losing the record
+  UFO.toMenu();
+  els.btnnew.click();
+  ok(UFO.state === "playing" && UFO.level === 1, "New game starts at level 1");
+  ok(UFO.save.best === 4, `and the record is untouched (${UFO.save.best})`);
+  startL(6);
+  ok(UFO.save.best === 6, "playing deeper still pushes it up");
+
+  // and from the results card, Enter goes back to the start screen
+  UFO.killPlayer();
+  frame(2);
+  ok(UFO.state === "dead", "dying ends the run");
+  frame(120);
+  ok(/GAME OVER/.test(els.ovtitle.textContent), `the results card shows (${els.ovtitle.textContent})`);
+  down("Enter");
+  up("Enter");
+  ok(UFO.inMenu, "and Enter takes you back to the start screen");
+  ok(UFO.menuChoice === 6, `with level 6 on offer (${UFO.menuChoice})`);
+  els.btncont.click();
+  frame(2);
+  ok(UFO.level === 6, "and Continue picks it up there");
+}
 
 /* -------------------------------------------------------------- the ladder */
 // One new thing per level, and nothing before its level: the point is that the
@@ -188,7 +270,7 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
   ok(UFO.tip.text.includes("SPAWNER"), "and says so on arrival");
 
   startL(6);
-  ok(UFO.wardens.length === 2, `level 6 adds the warden, in numbers (${UFO.wardens.length})`);
+  ok(UFO.wardens.length === 10, `level 6 adds the warden, in numbers (${UFO.wardens.length})`);
   ok(UFO.enemies.filter((e) => e.deck).length > 0,
     `and ${UFO.enemies.filter((e) => e.deck).length} spitter(s) posted on the blocks up there`);
   ok(UFO.tip.text.includes("WARDENS"), "and says so on arrival");
@@ -643,6 +725,22 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
     const seed = UFO.eBullets.find((b) => b.seed);
     ok(!!seed, "what it spits is a seed");
     ok(seed && seed.mesh.children.length >= 2, `with a ring around it (${seed ? seed.mesh.children.length : 0} parts)`);
+
+    // and a seed can be shot out of the air, so a gunfight is a two-way thing
+    const hpS = UFO.hp;
+    UFO.aim(shooter.x, shooter.z);
+    down("Space");
+    let seedGone = false;
+    for (let i = 0; i < 90 && !seedGone; i++) {
+      frame(1);
+      const s = UFO.eBullets.find((b) => b.seed);
+      if (s) UFO.aim(s.x, s.z);
+      else seedGone = true;
+    }
+    up("Space");
+    ok(seedGone, "and a bolt knocks a seed out of the air");
+    ok(UFO.hp === hpS, `so it never lands on the hull (${UFO.hp} hp)`);
+    ok(UFO.audio.log.includes("shotDown"), "with a ping to say so");
   }
 }
 
@@ -886,7 +984,7 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
 {
   startL(6);
   const wardens = UFO.wardens;
-  ok(wardens.length === 2, `level 6 posts ${wardens.length} wardens on the raised runs`);
+  ok(wardens.length === 10, `level 6 posts ${wardens.length} wardens on the raised runs`);
   const w = wardens[0];
   if (w) {
     only(w); // nothing else gets to end this run
@@ -933,10 +1031,20 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
       ok(Math.abs(glob.y - (UFO.liftCfg.alt + 1.6)) < 0.25,
         `the glob flies at the craft's level (${glob.y})`);
       ok(glob.mesh.children.length >= 1, "the shell is a fat lump with a flare on it");
-      for (let i = 0; i < 120 && UFO.hp === hpBefore; i++) frame(1);
+      // Measure the drop on the frame the shell lands: the glob drains the hover as
+      // it bursts, but the knock can put the craft on a block top (where the meter
+      // fills again) in the frames that follow
+      UFO.audio.clear();
+      let prevCharge = UFO.charge;
+      let drain = null;
+      for (let i = 0; i < 150 && drain === null; i++) {
+        frame(1);
+        if (UFO.audio.log.includes("globHit")) drain = prevCharge - UFO.charge;
+        prevCharge = UFO.charge;
+      }
       ok(UFO.hp < hpBefore, `and it hurts up there (${hpBefore} -> ${UFO.hp})`);
-      ok(UFO.charge < chargeBefore - 1.0,
-        `and it drinks the hover (${chargeBefore.toFixed(2)} -> ${UFO.charge.toFixed(2)}s)`);
+      ok(drain !== null && drain >= 0.9,
+        `and it drinks the hover (${drain === null ? "?" : drain.toFixed(2)}s gone on the hit)`);
       ok(UFO.explosions > 0, `and goes off like a mine on the hull (${UFO.explosions} in the air)`);
       frame(30);
       const flung = Math.hypot(UFO.pos.x - posBefore.x, UFO.pos.z - posBefore.z);
@@ -952,6 +1060,117 @@ ok(UFO.rim.length > 0 && UFO.pits.length === UFO.rim.length,
     for (let i = 0; i < 70 && !w.dead && w.hp === hpW; i++) frame(1);
     up("Space");
     ok(w.dead || w.hp < hpW, `a bolt up there reaches it (${hpW} -> ${w.dead ? "dead" : w.hp})`);
+  }
+}
+
+/* the warden's glob can be shot out of the air, from its own level */
+{
+  startL(6);
+  const w = UFO.wardens[0];
+  if (w) {
+    only(w);
+    // up on the block level, perched on a raised block beside it
+    const perch = UFO.blocks.find((b) => {
+      const d = Math.hypot(b.x - w.x, b.z - w.z);
+      return d > 4 && d < 14;
+    });
+    const pad = UFO.pads.reduce(
+      (best, p) => (Math.hypot(p.x - w.x, p.z - w.z) < Math.hypot(best.x - w.x, best.z - w.z) ? p : best),
+      normalPad(),
+    );
+    UFO.move(pad.x, pad.z);
+    frame(40);
+    ok(UFO.lift === 1, "the craft is up on the warden's level");
+    if (perch) UFO.move(perch.x, perch.z);
+    frame(2);
+
+    let glob = null;
+    for (let i = 0; i < 320 && !glob; i++) {
+      frame(1);
+      glob = UFO.eBullets.find((b) => b.kind === "glob");
+    }
+    ok(!!glob, "the warden spits a glob at the craft");
+    if (glob) {
+      const hp0 = UFO.hp;
+      const boom0 = UFO.explosions;
+      down("Space");
+      let gone = false;
+      for (let i = 0; i < 120 && !gone; i++) {
+        frame(1);
+        const g = UFO.eBullets.find((b) => b.kind === "glob");
+        if (g) UFO.aim(g.x, g.z);
+        else gone = true;
+      }
+      up("Space");
+      ok(gone, "and a bolt knocks it out of the air");
+      ok(UFO.explosions > boom0, `the shell still goes off out there (${UFO.explosions} bursts)`);
+      ok(UFO.hp === hp0, `and it never reaches the hull (${UFO.hp} hp)`);
+      ok(UFO.audio.log.includes("shotDown"), "with a ping as it comes apart");
+    }
+  }
+}
+
+/* the void level: the floor is gone, and the level above is the only road */
+{
+  startL(6);
+  ok(UFO.stats.voidFloor === true, "the warden level has no floor to speak of");
+  ok(!UFO.holeAt(UFO.pos.x, UFO.pos.z), "but the craft starts on solid ground");
+  const ex6 = UFO.worldOf(UFO.exit.col, UFO.exit.row);
+  ok(!UFO.holeAt(ex6.x, ex6.z), "and the exit is on solid ground too");
+  ok(UFO.pits.length > 200, `most of the map is a hole (${UFO.pits.length} cells)`);
+  ok(UFO.rifts.length === 0, "nothing spawns down there");
+  ok(ofType("grunt").length === 0 && UFO.shades.length === 0 &&
+    ofType("spitter").every((e) => e.deck), "and nothing walks down there either");
+  ok(UFO.wardens.length === 10, `the level above is all wardens (${UFO.wardens.length})`);
+  ok(UFO.wardens.every((w) => w.knock > 0 && w.knock < 40),
+    `posted with a gentler knock, so a hit is not a fall (${UFO.wardens[0] && UFO.wardens[0].knock})`);
+
+  // a pad in the room you start in, so the level can be entered at all
+  const nearPad = UFO.pads.reduce((b, p) => {
+    const d = Math.hypot(p.x - UFO.pos.x, p.z - UFO.pos.z);
+    return !b || d < b.d ? { p, d } : b;
+  }, null);
+  ok(nearPad && nearPad.d < 26, `with a pad a short hop from the start (${nearPad && nearPad.d.toFixed(1)}u)`);
+
+  // the road of blocks joins the two places that still have ground
+  {
+    const key = (c, r) => `${c},${r}`;
+    const nbr = (k) => [[1, 0], [-1, 0], [0, 1], [0, -1]]
+      .map(([dc, dr]) => key(k.col + dc, k.row + dr));
+    const road = new Set(UFO.blocks.map((b) => key(b.col, b.row)));
+    const seeds = nbr(UFO.startCell).filter((k) => road.has(k));
+    const goals = new Set(nbr(UFO.exit).filter((k) => road.has(k)));
+    const seen = new Set(seeds);
+    const q = [...seeds];
+    for (let i = 0; i < q.length; i++) {
+      const [c, r] = q[i].split(",").map(Number);
+      for (const k of nbr({ col: c, row: r })) {
+        if (!road.has(k) || seen.has(k)) continue;
+        seen.add(k);
+        q.push(k);
+      }
+    }
+    ok(seeds.length > 0 && [...goals].some((k) => seen.has(k)),
+      `and the road runs from the start to the exit (${seen.size} blocks joined)`);
+  }
+
+  // the craft can get up there and stay up: the road is a floor to land on
+  {
+    const pad = nearPad && nearPad.p;
+    if (pad) {
+      UFO.move(pad.x, pad.z);
+      frame(40);
+      ok(UFO.lift === 1, "the pad takes the craft up onto the road");
+      const block = UFO.blocks.reduce((b, w) => {
+        const d = Math.hypot(w.x - UFO.pos.x, w.z - UFO.pos.z);
+        return !b || d < b.d ? { ...w, d } : b;
+      }, null);
+      if (block) {
+        UFO.move(block.x, block.z);
+        frame(4);
+        ok(UFO.onBlock, "and the blocks are something to stand on");
+      }
+    }
   }
 }
 

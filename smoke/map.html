@@ -35,11 +35,13 @@
       const lvl = Number(q.get("level") || 1);
       const size = lvl <= 2 ? 13 + lvl * 2 : lvl === 3 ? 21 : Math.min(35, 23 + (lvl - 4) * 2);
       const upper = lvl >= 4;              // UNLOCK.upper
-      const liftCount = upper ? Math.min(6, 2 + Math.floor((lvl - 4) / 2)) : 0;
+      const voidFloor = lvl === 6;         // the warden level: the floor is gone
+      const liftCount = lvl === 6 ? 3 : upper ? Math.min(6, 2 + Math.floor((lvl - 4) / 2)) : 0;
       const L = createLevel({
         cols: size, rows: size, seed: 1000 + lvl, liftCount, upper,
         rooms: lvl <= 2 ? 2 : lvl === 3 ? 4 : 99,
-        startPad: lvl === 4, startDeck: lvl === 4,
+        startPad: lvl === 4 || voidFloor, startDeck: lvl === 4 || voidFloor,
+        voidFloor,
       });
 
       const scale = Math.max(6, Math.floor(880 / size));

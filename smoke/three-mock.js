@@ -119,7 +119,18 @@ export class Color {
 }
 
 class Material {
-  constructor(opts = {}) { Object.assign(this, opts); this.emissiveIntensity = opts.emissiveIntensity ?? 1; this.dispose = () => {}; }
+  constructor(opts = {}) {
+    Object.assign(this, opts);
+    // main.js tints materials with material.color.setHex(...), the way three.js
+    // does, so a numeric colour has to come back as a Color here too - and a
+    // material with no colour at all is white, as it is in three.js
+    if (typeof this.color === "number") this.color = new Color(this.color);
+    else if (!this.color) this.color = new Color(0xffffff);
+    if (typeof this.emissive === "number") this.emissive = new Color(this.emissive);
+    else if (!this.emissive) this.emissive = new Color(0x000000);
+    this.emissiveIntensity = opts.emissiveIntensity ?? 1;
+    this.dispose = () => {};
+  }
   clone() { return new this.constructor(this); }
 }
 export class MeshStandardMaterial extends Material {}
@@ -130,7 +141,7 @@ export class CanvasTexture {
   constructor(canvas) { this.image = canvas; this.repeat = new Vec(1, 1, 0); this.colorSpace = null; this.wrapS = 0; this.wrapT = 0; this.anisotropy = 1; }
   dispose() {}
 }
-export class Fog { constructor(color, near, far) { this.color = color; this.near = near; this.far = far; } }
+export class Fog { constructor(color, near, far) { this.color = new Color(color); this.near = near; this.far = far; } }
 export class PerspectiveCamera extends Obj3D {
   constructor(fov, aspect, near, far) { super(); this.fov = fov; this.aspect = aspect; this.near = near; this.far = far; }
   updateProjectionMatrix() {}
@@ -143,13 +154,13 @@ export class Raycaster {
 export class PointLight extends Obj3D {
   constructor(color, intensity, distance, decay) {
     super();
-    this.color = color; this.intensity = intensity; this.distance = distance; this.decay = decay;
+    this.color = new Color(color); this.intensity = intensity; this.distance = distance; this.decay = decay;
     this.castShadow = false;
     this.shadow = { mapSize: { set() {} }, bias: 0, camera: { far: 500 } };
   }
 }
 export class AmbientLight extends Obj3D {
-  constructor(color, intensity) { super(); this.color = color; this.intensity = intensity; }
+  constructor(color, intensity) { super(); this.color = new Color(color); this.intensity = intensity; }
 }
 export class Matrix4 {
   compose() { return this; }

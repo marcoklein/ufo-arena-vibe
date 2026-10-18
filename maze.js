@@ -238,7 +238,7 @@ function generate(cols, rows, rng, maxRooms = 99, tower = 0.35) {
 // Nothing is stamped in the start room, in a corridor, or within one cell of a
 // room's edge. So no doorway is ever pinched, the inside rim of every room stays
 // walkable, and neither a block nor a hole can cut a room in half.
-function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
+function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false, voidFloor = false } = {}) {
   const upper = new Set();   // low blocks: the level above the floor
   const holes = new Set();   // holes in the floor: nothing up there to land on
   const vaults = [];         // courtyards that only open from above
@@ -441,9 +441,10 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
 
   // first dibs: the biggest room that can take a ring gets the vault, because a
   // sealed courtyard with its own pad is the clearest answer to "what is the
-  // level above for?" - and it needs the room to spare
+  // level above for?" - and it needs the room to spare. A level with no floor has
+  // no use for a courtyard in it, so those get none.
   let reserved = -1;
-  {
+  if (!voidFloor) {
     const fits = (idx) => rooms[idx].w >= 6 && rooms[idx].h >= 6;
     const others = order.filter(fits).sort((a, b) => rooms[b].w * rooms[b].h - rooms[a].w * rooms[a].h);
     for (const idx of others) {
@@ -463,7 +464,7 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
 
     const roll = rng();
     let cells;
-    if (rooms[idx].w >= 6 && rooms[idx].h >= 6 && roll < 0.34) {
+    if (!voidFloor && rooms[idx].w >= 6 && rooms[idx].h >= 6 && roll < 0.34) {
       const keep = idx === 0 ? { col: rooms[0].cx, row: rooms[0].cy } : null;
       cells = vault(rooms[idx], keep);
     }
@@ -479,7 +480,12 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
   // across it is over it. A run is only taken if the level survives it - the walk
   // from the start is recounted after each one and the run is taken back if it cut
   // anything off - so a void is always a shortcut or a risk, never the only road.
+  //
+  // A level whose whole floor is a void (see createLevel) has no use for either
+  // of these: there is nothing left to cut, and nothing left to roof over.
   const voids = new Set();
+  const roofs = new Set();
+  if (!voidFloor) {
   const startRoom = rooms[0];
   const rowCount = grid.length;
   const walkCount = () => {
@@ -543,7 +549,6 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
   // level above is not a free flight path over the whole map: there are places
   // where the only way on is down, out from under the roof, and back up on the
   // other side (or round, on the floor).
-  const roofs = new Set();
   {
     const corridor = (c, r) => grid[r] && grid[r][c] === "." && !roomCells.has(`${c},${r}`);
     const wantRoofs = Math.max(2, Math.min(8, Math.floor(cols / 5)));
@@ -570,6 +575,7 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
       runs++;
     }
   }
+  } // not a void floor: the tunnels and the corridor voids are only for levels with a floor
 
   return { upper, holes, vaults, vaultRings, voids, roofs };
 }
@@ -577,14 +583,14 @@ function stampUpperLevel(grid, rooms, cols, rng, { startDeck = false } = {}) {
 /* ------------------------------------------------------------------ level */
 export function createLevel({
   cols = 25, rows = 25, seed = 1, liftCount = 2, upper: wantUpper = true, rooms: maxRooms = 99,
-  startPad = false, startDeck = false, tower = 0.35,
+  startPad = false, startDeck = false, tower = 0.35, voidFloor = false,
 } = {}) {
   const rng = makeRng(seed);
   const { grid, rooms, stats } = generate(cols, rows, rng, maxRooms, tower);
   // the level above the floor, and the holes in it. Levels before the lift is
   // introduced are built without any of it.
   const built = wantUpper
-    ? stampUpperLevel(grid, rooms, cols, rng, { startDeck })
+    ? stampUpperLevel(grid, rooms, cols, rng, { startDeck, voidFloor })
     : { upper: new Set(), holes: new Set(), vaults: [], vaultRings: new Set(), voids: new Set(), roofs: new Set() };
   const upper = built.upper;
   const pits = built.holes;
@@ -732,6 +738,95 @@ export function createLevel({
     for (let i = vaults.length - 1; i >= 0; i--) {
       if (vaults[i].col === exit.col && vaults[i].row === exit.row) vaults.splice(i, 1);
     }
+  }
+
+  /* ------------------------------------------------------ the void floor */
+  // One level is all holes down there. The floor survives only in the room you
+  // start in and the room the exit is in; everywhere else is a void, and the
+  // level above is the only way across. A raised run is laid along the walk from
+  // the start to the exit first, so the road always joins the two places that
+  // still have ground - and it is raised *before* the floor goes, so it is the
+  // same walk a walker would have taken.
+  if (voidFloor) {
+    const at = (c, r) => r * cols + c;
+    const floor = (c, r) => c > 0 && r > 0 && c < cols - 1 && r < rows - 1 &&
+      grid[r][c] === "." && !walls.has(`${c},${r}`);
+    // the walk from the start to the exit, over the floor as it stands
+    const prev = new Int32Array(cols * rows).fill(-1);
+    const seen = new Uint8Array(cols * rows);
+    const q = [[start.col, start.row]];
+    seen[at(start.col, start.row)] = 1;
+    for (let h = 0; h < q.length; h++) {
+      const [c, r] = q[h];
+      for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const cc = c + dc;
+        const rr = r + dr;
+        if (!floor(cc, rr) || seen[at(cc, rr)]) continue;
+        seen[at(cc, rr)] = 1;
+        prev[at(cc, rr)] = at(c, r);
+        q.push([cc, rr]);
+      }
+    }
+    const road = [];
+    if (seen[at(exit.col, exit.row)]) {
+      for (let k = at(exit.col, exit.row); k !== at(start.col, start.row) && k >= 0; k = prev[k]) {
+        road.push([k % cols, Math.floor(k / cols)]);
+      }
+      road.reverse();
+    }
+    // Raise the walk, plus one cell beside it, so there is a road wide enough to
+    // drive and to pass a warden standing on it. Neither the start cell nor the
+    // exit cell is ever built over: those two are floor, and stay floor.
+    const raised = [];
+    for (const [c, r] of road) {
+      for (const [dc, dr] of [[0, 0], [1, 0], [0, 1]]) {
+        const cc = c + dc;
+        const rr = r + dr;
+        if (cc === start.col && rr === start.row) continue;
+        if (cc === exit.col && rr === exit.row) continue;
+        if (!floor(cc, rr)) continue;
+        const key = `${cc},${rr}`;
+        grid[rr][cc] = "#";
+        upper.add(key);
+        walls.add(key);
+        wallKind.set(key, "O");
+        raised.push(key);
+      }
+    }
+    // a raised cell is a block, not floor: it leaves the list of places anything
+    // can stand or spawn
+    for (let i = openCells.length - 1; i >= 0; i--) {
+      const [c, r] = openCells[i];
+      if (upper.has(`${c},${r}`)) openCells.splice(i, 1);
+    }
+    // and then the floor goes: everything outside the two rooms with ground left
+    const keep = new Set();
+    const keepRoom = (room) => {
+      for (let r = room.y; r < room.y + room.h; r++) {
+        for (let c = room.x; c < room.x + room.w; c++) keep.add(`${c},${r}`);
+      }
+    };
+    keepRoom(rooms[0]);
+    const exitRoom = rooms.find((room) =>
+      exit.col >= room.x && exit.col < room.x + room.w &&
+      exit.row >= room.y && exit.row < room.y + room.h);
+    if (exitRoom) keepRoom(exitRoom);
+    // a small island round the exit itself, whatever shape its room turned out to be
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) keep.add(`${exit.col + dc},${exit.row + dr}`);
+    }
+    for (let i = openCells.length - 1; i >= 0; i--) {
+      const [c, r] = openCells[i];
+      const key = `${c},${r}`;
+      if (keep.has(key) || upper.has(key)) continue;
+      openCells.splice(i, 1);
+      grid[r][c] = "#";
+      pits.add(key);
+      wallKind.set(key, "P");
+      stats.pits++;
+    }
+    stats.voidFloor = true;
+    stats.road = raised.length;
   }
 
   /* ------------------------------------------------------ room character */

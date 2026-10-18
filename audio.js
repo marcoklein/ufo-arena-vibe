@@ -259,6 +259,19 @@ const SFX = {
     noiseHit(rig, t, { dur: 0.55, peak: 0.26, bp: 2600, sweep: 200, q: 1.6, ...o });
     tone(rig, t, { type: "sawtooth", f0: 760, f1: 110, dur: 0.5, peak: 0.16, ...o });
   },
+  // a rift giving way: the tear howling as it comes apart, longer and lower
+  riftDie(rig, t, o) {
+    noiseHit(rig, t, { dur: 1.15, peak: 0.3, bp: 2400, sweep: 120, q: 1.2, ...o });
+    tone(rig, t, { type: "sawtooth", f0: 640, f1: 62, dur: 1.05, peak: 0.28, a: 0.01, sub: 0.45, ...o });
+    tone(rig, t + 0.1, { type: "square", f0: 420, f1: 130, dur: 0.75, peak: 0.1, spread: 30, ...o });
+    noiseHit(rig, t + 0.35, { dur: 0.7, peak: 0.16, bp: 1400, sweep: 90, ...o });
+  },
+  // a shot knocked out of the air: a bright ping with a scrape on it
+  shotDown(rig, t, o) {
+    tone(rig, t, { type: "square", f0: 2300, f1: 640, dur: 0.07, peak: 0.17, a: 0.001, ...o });
+    tone(rig, t + 0.01, { type: "triangle", f0: 3300, f1: 1500, dur: 0.13, peak: 0.1, ...o });
+    noiseHit(rig, t, { dur: 0.05, peak: 0.15, hp: 3000, ...o });
+  },
   // the shade deciding you are worth it: a low, sour cluster
   shadeWake(rig, t, o) {
     tone(rig, t, { type: "sawtooth", f0: 92, dur: 1.2, peak: 0.24, a: 0.05, spread: 22, ...o });

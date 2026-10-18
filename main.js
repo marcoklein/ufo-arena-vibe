@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { CELL, RADIUS, createLevel, makeRng } from "./maze.js";
 import { THEMES } from "./themes.js";
 import { gameAudio } from "./audio.js";
+import { blank, pickStore, readSave, reachLevel, writeSave } from "./save.js";
 
 /* ------------------------------------------------------------------ config */
 const SPEED = 16;        // forward speed, units/second
@@ -59,7 +60,8 @@ const LURK = {
   hp: (n) => 9 + n * 2,
 };
 
-/* rifts: standing tears in the level that keep producing monsters */
+/* rifts: standing tears in the level that keep producing monsters. They are not
+   scenery: a tear can be shot to pieces, and then it stops producing anything. */
 const RIFT = {
   warn: 17,          // a nearby rift always telegraphs before it opens
   warnTime: 1.3,
@@ -67,6 +69,11 @@ const RIFT = {
   min: 4.5,
   cap: 6,            // extra monsters allowed on top of the level's own
   grace: (n) => Math.max(7, 20 - n), // breathing room at the start of a level
+  r: 1.9,            // a bolt that passes this close to the tear goes into it
+  hp: (n) => Math.min(24, 8 + n * 2), // bolts it takes to tear one down...
+  fuse: 2.4,         // ...and then this long coming apart before it goes
+  blast: 8.5,        // how far the end of it is felt
+  dmg: PLAYER_HP * 0.2, // what standing at the centre of that blast costs
 };
 
 // The blocks standing on the floor are the level above it: every block top is a
@@ -116,22 +123,30 @@ const CROWN_WARM = 0xffa53d;
 //   4  + the level above: lift pads, raised decks, holes and tunnels, and a pad
 //      in the room you start in so it can be tried straight away
 //   5  + spawners: a room full of rifts, so it is obvious where monsters come from
-//   6  + wardens up there
+//   6  + wardens, and a level with the floor taken away: the level above is the
+//      only road from the start room to the exit room, and it is held by wardens
 //   7+ everything at once, in bigger numbers - but the maps stop growing, so it
 //      gets denser rather than emptier
 const UNLOCK = { spitter: 2, shade: 3, upper: 4, rift: 5, warden: 6 };
 const allow = (thing, n) => n >= UNLOCK[thing];
 
+/* The warden level is a different place from every other one: the floor is gone.
+   A road of blocks is the only way across, so nothing walks down there and there
+   is nothing to send after you - what is up on the blocks is the whole level, and
+   it is wardens. It is the level that says what the level above is for. */
+const VOID_LEVEL = UNLOCK.warden;
+const isVoid = (n) => n === VOID_LEVEL;
+
 // The first two levels are little more than a room each: nowhere to hide, nothing
 // but the one new thing to work out. Then the size climbs to a ceiling and stays
 // there, so the late levels are won on the mechanics, not on map size.
 const levelSize = (n) => (n <= 2 ? 13 + n * 2 : n === 3 ? 21 : Math.min(35, 23 + (n - 4) * 2));
-const levelEnemies = (n) => Math.min(26, 3 + n * 2);  // roaming hunters
-const levelGuards = (n) => Math.min(10, n);           // defenders ringing the exit
-const levelLurkers = (n) => (allow("shade", n) ? Math.min(4, 1 + Math.floor((n - 3) / 2)) : 0);
-const levelRifts = (n) => (allow("rift", n) ? Math.min(7, 2 + Math.floor(n / 2)) : 0);
-const levelLifts = (n) => (allow("upper", n) ? Math.min(6, 2 + Math.floor((n - 4) / 2)) : 0);
-const levelWardens = (n) => (allow("warden", n) ? Math.min(8, 2 + Math.floor((n - 6) / 2)) : 0);
+const levelEnemies = (n) => (isVoid(n) ? 0 : Math.min(26, 3 + n * 2)); // roaming hunters
+const levelGuards = (n) => (isVoid(n) ? 0 : Math.min(10, n));          // defenders ringing the exit
+const levelLurkers = (n) => (allow("shade", n) && !isVoid(n) ? Math.min(4, 1 + Math.floor((n - 3) / 2)) : 0);
+const levelRifts = (n) => (allow("rift", n) && !isVoid(n) ? Math.min(7, 2 + Math.floor(n / 2)) : 0);
+const levelLifts = (n) => (allow("upper", n) ? (isVoid(n) ? 3 : Math.min(6, 2 + Math.floor((n - 4) / 2))) : 0);
+const levelWardens = (n) => (allow("warden", n) ? (isVoid(n) ? 10 : Math.min(8, 2 + Math.floor((n - 6) / 2))) : 0);
 
 /* Every level has a character: some are wide open, some are a thicket of towers
    and monoliths you cannot see over. It swings from one extreme to the other,
@@ -144,7 +159,102 @@ const levelTowerness = (n) => {
 };
 // and things that shoot, standing on the block tops: the level above has its own
 // garrison, so rushing it is not a free ride
-const levelDeckers = (n) => (allow("warden", n) ? Math.min(6, 1 + Math.floor((n - 6) / 2)) : 0);
+const levelDeckers = (n) => (allow("warden", n) ? (isVoid(n) ? 2 : Math.min(6, 1 + Math.floor((n - 6) / 2))) : 0);
+
+/* ------------------------------------------------------------ the palette */
+// One look per level, and no two levels in a row look alike. The rock, the level
+// above, the glowing trim, the floor light, the fog and the tower lights all move
+// together, and a level dresses its rooms from two or three themes instead of all
+// six - so one level is a green level, the next is ember, and the one after is
+// louder than both. It is deterministic: a level number always looks the same.
+//
+// `shade` multiplies every wall colour (a level can be a dark one), `lampPower`
+// is the craft's own light, and `themes` are the room themes this level draws
+// from, in order.
+const PALETTES = [
+  {
+    id: "slate", rock: 0x3f4d61, tower: 0x2f6b70, monolith: 0x3a4762, block: 0x7a4f3a,
+    border: 0x33415a, trim: 0x49b8ff, trimWarm: 0xffa53d, fog: 0x02040a, floor: 0x9fb3c8,
+    ambient: 0x1a2636, lamp: 0xffe4bc, mast: 0x8fa3bb, tip: 0xff9a6b,
+    shade: 0.85, lampPower: 135, themes: [0, 2],
+  },
+  {
+    id: "moss", rock: 0x33503f, tower: 0x2c6b52, monolith: 0x2f4a3a, block: 0x5e6b32,
+    border: 0x2b4032, trim: 0x76ff9a, trimWarm: 0xd6ff6a, fog: 0x020806, floor: 0x9dc2a6,
+    ambient: 0x16281c, lamp: 0xfff0c8, mast: 0x7fa88c, tip: 0xb6ffc8,
+    shade: 0.8, lampPower: 130, themes: [3, 5, 0],
+  },
+  {
+    id: "ember", rock: 0x5a3a30, tower: 0x7a4a26, monolith: 0x4a3226, block: 0x8a5230,
+    border: 0x462e26, trim: 0xff7a2f, trimWarm: 0xffc06a, fog: 0x0a0402, floor: 0xc4a488,
+    ambient: 0x2a1a12, lamp: 0xffd9a0, mast: 0xb08a6a, tip: 0xffb066,
+    shade: 0.82, lampPower: 126, themes: [1, 5],
+  },
+  {
+    id: "frost", rock: 0x3d5c6b, tower: 0x2f7f92, monolith: 0x35576b, block: 0x4a6a80,
+    border: 0x34525f, trim: 0x9fe8ff, trimWarm: 0xbfe9ff, fog: 0x02070c, floor: 0xc3dbe8,
+    ambient: 0x18283a, lamp: 0xe8f4ff, mast: 0x9fc4d6, tip: 0xd8f6ff,
+    shade: 0.92, lampPower: 126, themes: [2, 0],
+  },
+  {
+    id: "violet", rock: 0x473d68, tower: 0x5a3f8f, monolith: 0x3f3560, block: 0x6a4a86,
+    border: 0x392f56, trim: 0xa98bff, trimWarm: 0xff8bd0, fog: 0x050210, floor: 0xb9acd6,
+    ambient: 0x1e1830, lamp: 0xf0e4ff, mast: 0x9d8ec4, tip: 0xd8c8ff,
+    shade: 0.86, lampPower: 135, themes: [4, 0],
+  },
+  {
+    id: "toxic", rock: 0x36543c, tower: 0x4a6b2a, monolith: 0x2f4a2f, block: 0x6b7a2f,
+    border: 0x2c4430, trim: 0xbaff5e, trimWarm: 0xffe14d, fog: 0x040802, floor: 0xb8d296,
+    ambient: 0x1a2414, lamp: 0xf6ffd0, mast: 0x93a878, tip: 0xe6ff8a,
+    shade: 0.82, lampPower: 130, themes: [3, 1],
+  },
+  {
+    id: "candy", rock: 0x3c4f74, tower: 0x2f8fa8, monolith: 0x463a72, block: 0x8a4a6a,
+    border: 0x35446b, trim: 0x63f5ff, trimWarm: 0xff7ac8, fog: 0x04030c, floor: 0xc4bde8,
+    ambient: 0x1c1a34, lamp: 0xffe8f6, mast: 0x9a9cc8, tip: 0xffa8e8,
+    shade: 0.9, lampPower: 126, themes: [0, 4, 1],
+  },
+];
+// The first two levels keep the plain slate look - that is where you are learning
+// to look around - and from level 3 the looks walk a fixed cycle, so consecutive
+// levels never share one and every look comes round once every six levels.
+const PALETTE_STRIDE = 5; // coprime with the number of rotating palettes
+function levelPalette(n) {
+  if (n <= 2) return PALETTES[0];
+  const rotating = PALETTES.length - 1;
+  return PALETTES[1 + (((n - 3) * PALETTE_STRIDE) % rotating)];
+}
+let palette = PALETTES[0];
+let themeMap = PALETTES[0].themes;
+// the rock colour for a wall kind, out of the level's palette
+const paletteRock = (kind) => (kind === "X" ? palette.tower
+  : kind === "S" ? palette.monolith
+  : kind === "B" ? palette.border
+  : kind === "O" ? palette.block
+  : palette.rock);
+// a room theme, as this level dresses it: the level only uses its own few
+const themeAt = (t) => (t === undefined || t === null ? undefined : themeMap[t % themeMap.length]);
+
+/* everything about the palette that is not per-cell: the fog, the sky, the floor,
+   the craft's own lamp, and the shared materials the level is built from */
+function applyPalette() {
+  scene.fog.color.setHex(palette.fog);
+  scene.background.setHex(palette.fog);
+  ambientLight.color.setHex(palette.ambient);
+  playerLight.color.setHex(palette.lamp);
+  playerLight.intensity = palette.lampPower ?? 150;
+  floor.material.color.setHex(palette.floor);
+  roofMat.color.setHex(palette.rock);
+  roofTrimMat.color.setHex(palette.trim);
+  roofTrimMat.emissive.setHex(palette.trim);
+  pitEdgeMat.color.setHex(palette.trim);
+  roofLampMat.color.setHex(palette.trim);
+  ventMats.forEach((m, i) => {
+    const c = [palette.trim, palette.trimWarm, palette.block][i] ?? palette.trim;
+    m.color.setHex(c);
+    m.emissive.setHex(c);
+  });
+}
 
 /* The warden: rooted on the raised runs, and only interested in things on its
    own level. It sits there half asleep while you are on the floor; the moment the
@@ -372,7 +482,9 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+// just over 1: with the craft's own lamp this close to the rock, a hotter
+// exposure turns every flat top into snow
+renderer.toneMappingExposure = 1.02;
 document.body.appendChild(renderer.domElement);
 
 // dull reflections for the metalwork; deliberately weak so the gloom survives
@@ -384,9 +496,12 @@ document.body.appendChild(renderer.domElement);
 }
 
 /* ------------------------------------------------------------------ lights */
-scene.add(new THREE.AmbientLight(0x1a2636, 0.14));
+const ambientLight = new THREE.AmbientLight(0x1a2636, 0.14);
+scene.add(ambientLight);
 
-const playerLight = new THREE.PointLight(0xffe4bc, 220, 190, 1.5);
+// the craft's lamp: what it reaches is what you see, so it has to be strong -
+// but the falloff is short enough that a block top reads as rock, not as snow
+const playerLight = new THREE.PointLight(0xffe4bc, 150, 190, 1.7);
 playerLight.position.set(0, HOVER, 0);
 playerLight.castShadow = true;
 playerLight.shadow.mapSize.set(1024, 1024);
@@ -456,8 +571,27 @@ function crownMaterial(color) {
   }
   return mat;
 }
-const mastMat = new THREE.MeshStandardMaterial({ color: 0x8fa3bb, metalness: 0.7, roughness: 0.45, emissive: 0x1b3f47, emissiveIntensity: 0.8 });
-const tipMat = new THREE.MeshStandardMaterial({ color: 0xff9a6b, emissive: 0xff5a3c, emissiveIntensity: 3 });
+// tower lights, in the level's own colours
+const mastMatCache = new Map();
+function mastMaterial(color) {
+  let mat = mastMatCache.get(color);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({
+      color, metalness: 0.7, roughness: 0.45, emissive: color, emissiveIntensity: 0.4,
+    });
+    mastMatCache.set(color, mat);
+  }
+  return mat;
+}
+const tipMatCache = new Map();
+function tipMaterial(color) {
+  let mat = tipMatCache.get(color);
+  if (!mat) {
+    mat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 3 });
+    tipMatCache.set(color, mat);
+  }
+  return mat;
+}
 const ventTex = ventTexture();
 const ventMats = [0x38e8d8, 0xffa53d, 0x8b7bff].map((c) => new THREE.MeshStandardMaterial({
   map: ventTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -475,7 +609,7 @@ function padMaterial(theme) {
   let mat = padMatCache.get(theme);
   if (!mat) {
     mat = new THREE.MeshBasicMaterial({
-      map: padTex, color: THEMES[theme].pad, transparent: true, opacity: 0.55,
+      map: padTex, color: THEMES[theme].pad, transparent: true, opacity: 0.42,
       blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false,
     });
     padMatCache.set(theme, mat);
@@ -554,10 +688,10 @@ function buildWorld(L) {
       wallMesh.setMatrixAt(i, m);
       // walls lining a themed room take that room's colour. The raised runs are
       // the level above the floor, so they keep one look all over the maze.
-      const theme = L.wallTheme.get(key);
+      const theme = themeAt(L.wallTheme.get(key));
       const raised = L.upper && L.upper.has(key);
-      col.setHex(raised ? WALL_STYLE.O.color : theme === undefined ? style.color : THEMES[theme].wall)
-        .multiplyScalar(0.85 + decor() * 0.35);
+      col.setHex(raised ? palette.block : theme === undefined ? paletteRock(kind) : THEMES[theme].wall)
+        .multiplyScalar((palette.shade ?? 0.85) + decor() * 0.3);
       wallMesh.setColorAt(i, col);
       i++;
     }
@@ -631,13 +765,13 @@ function buildWorld(L) {
     for (const key of L.walls) {
       if (L.wallKind.get(key) === "P") continue; // a hole has no crown to trim
       const [c, r] = key.split(",").map(Number);
-      const theme = L.wallTheme.get(key);
+      const theme = themeAt(L.wallTheme.get(key));
       const kind = L.wallKind.get(key);
-      const color = L.isBorderCell(c, r) ? CROWN_COOL
-        : L.upper && L.upper.has(key) ? CROWN_WARM
+      const color = L.isBorderCell(c, r) ? palette.trim
+        : L.upper && L.upper.has(key) ? palette.trimWarm
         : theme !== undefined ? THEMES[theme].trim
-        : kind === "O" ? CROWN_WARM
-        : CROWN_COOL;
+        : kind === "O" ? palette.trimWarm
+        : palette.trim;
       if (!groups.has(color)) groups.set(color, []);
       groups.get(color).push(key);
     }
@@ -656,7 +790,7 @@ function buildWorld(L) {
 
   /* glowing floor pad marking out each room */
   for (const room of L.rooms) {
-    const pad = new THREE.Mesh(padGeo, padMaterial(room.theme));
+    const pad = new THREE.Mesh(padGeo, padMaterial(themeAt(room.theme) ?? 0));
     pad.rotation.x = -Math.PI / 2;
     pad.scale.set(room.w * CELL, room.h * CELL, 1);
     pad.position.set(
@@ -667,20 +801,20 @@ function buildWorld(L) {
 
   /* props standing on the walls that line each themed room */
   if (L.features.size) {
-    const byKind = new Map(); // "theme:kind" -> wall keys
+    const byKind = new Map(); // theme -> wall keys
     for (const [key, f] of L.features) {
-      const id = `${f.theme}:${f.kind}`;
-      if (!byKind.has(id)) byKind.set(id, []);
-      byKind.get(id).push(key);
+      const t = themeAt(f.theme) ?? 0;
+      if (!byKind.has(t)) byKind.set(t, []);
+      byKind.get(t).push(key);
     }
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const p = new THREE.Vector3();
     const s = new THREE.Vector3();
     const up = new THREE.Vector3(0, 1, 0);
-    for (const [id, keys] of byKind) {
-      const [themeIdx, kind] = id.split(":");
-      const theme = THEMES[Number(themeIdx)];
+    for (const [t, keys] of byKind) {
+      const theme = THEMES[t];
+      const kind = theme.kind;
       if (!propGeo[kind]) continue;
       const mesh = new THREE.InstancedMesh(propGeo[kind], propMaterial(theme.prop), keys.length);
       const half = kind === "vent" ? 0.4 : kind === "crystal" ? 1.5 : 1.7;
@@ -705,8 +839,8 @@ function buildWorld(L) {
     return !L.isBorderCell(c, r) && L.wallKind.get(key) === "X" && (c * 7 + r * 13) % 3 === 0;
   });
   if (towers.length) {
-    const mastMesh = new THREE.InstancedMesh(mastGeo, mastMat, towers.length);
-    const tipMesh = new THREE.InstancedMesh(tipGeo, tipMat, towers.length);
+    const mastMesh = new THREE.InstancedMesh(mastGeo, mastMaterial(palette.mast), towers.length);
+    const tipMesh = new THREE.InstancedMesh(tipGeo, tipMaterial(palette.tip), towers.length);
     const m = new THREE.Matrix4();
     towers.forEach((key, i) => {
       const [c, r] = key.split(",").map(Number);
@@ -1263,7 +1397,7 @@ function cellsOfKind(kind) {
   return out;
 }
 
-function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0, deck = false } = {}) {
+function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0, deck = false, rate = 0, knock = 0 } = {}) {
   if (type === "lurker") return spawnShade(x, z, power);
   const spec = ENEMY_SPEC[type];
   const mine = type === "grunt" ? buildMine(x, z) : null;
@@ -1285,7 +1419,10 @@ function spawnEnemy(type, x, z, power, { guard = false, hpBonus = 0, deck = fals
     fireT: 1 + decor(),
     fireRate: Math.max(0.7, 2.4 - power * 0.13),
     // how long a warden winds up: shorter the deeper the run goes
-    rate: Math.max(1.1, WARDEN.rate - Math.max(0, power - 6) * 0.08),
+    rate: rate || Math.max(1.1, WARDEN.rate - Math.max(0, power - 6) * 0.08),
+    // and how hard its shell throws you (the void level's are gentler: a knock
+    // there is a knock off the road)
+    knock: knock || WARDEN.knock,
     hitT: 0,
     recoilT: 0,
     dead: false,
@@ -1380,7 +1517,7 @@ const shotDir = new THREE.Vector3();
 let bullets = [];
 let eBullets = [];
 
-function addBullet(list, kind, x, y, z, vx, vz, life, dmg, level = 0) {
+function addBullet(list, kind, x, y, z, vx, vz, life, dmg, level = 0, opts = {}) {
   const isSeed = kind === "seed";
   const isGlob = kind === "glob";
   const mesh = new THREE.Mesh(
@@ -1399,7 +1536,9 @@ function addBullet(list, kind, x, y, z, vx, vz, life, dmg, level = 0) {
   glow.scale.setScalar(isGlob ? 1.6 : isSeed ? 1.3 : 0.85);
   mesh.add(glow);
   bulletGroup.add(mesh);
-  list.push({ x, y, z, vx, vz, life, dmg, mesh, kind, seed: isSeed, level });
+  // what it takes to touch it: a fat glob is a wide target, a seed a small one
+  const r = isGlob ? 0.85 : isSeed ? 0.5 : BULLET_R;
+  list.push({ x, y, z, vx, vz, life, dmg, mesh, kind, seed: isSeed, level, r, knock: opts.knock || 0 });
 }
 
 /* ------------------------------------------------------------- explosions */
@@ -2264,7 +2403,8 @@ function stepWarden(e, dt) {
       e.fireT = (e.rate || WARDEN.rate) * (0.85 + decor() * 0.3);
       // it flies on the craft's level, so a glob is a thing that can reach you
       addBullet(eBullets, "glob", e.x + ux * 1.15, HOVER + LIFT.alt - 0.1, e.z + uz * 1.15,
-        ux * WARDEN.shotSpeed, uz * WARDEN.shotSpeed, 3.2, WARDEN.dmg, 1);
+        ux * WARDEN.shotSpeed, uz * WARDEN.shotSpeed, 3.2, WARDEN.dmg, 1,
+        { knock: e.knock || WARDEN.knock });
       gameAudio.sfx("wardenShot", { x: e.x, z: e.z });
       e.recoilT = 0.22;
     }
@@ -2289,7 +2429,20 @@ function stepWarden(e, dt) {
 
 /* ------------------------------------------------------- monster rifts */
 // Spawn points: a standing ring of dark energy on the floor. It hums, then
-// tears open and something crawls out.
+// tears open and something crawls out. Shoot it and it comes apart for good.
+const RIFT_TINT = 0x8f4bff;   // a healthy tear...
+const RIFT_TINT_HURT = 0xff4b5e; // ...and one that has taken a beating
+
+// blend two hex colours, for the tint of a tear as its hit points run down
+function mixHex(a, b, k) {
+  const t = Math.max(0, Math.min(1, k));
+  const ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+  const br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+  return (Math.round(ar + (br - ar) * t) << 16) |
+    (Math.round(ag + (bg - ag) * t) << 8) |
+    Math.round(ab + (bb - ab) * t);
+}
+
 const riftGroup = new THREE.Group();
 scene.add(riftGroup);
 const riftRingGeo = new THREE.TorusGeometry(1.75, 0.21, 8, 26);
@@ -2302,6 +2455,7 @@ const riftGlowMat = new THREE.SpriteMaterial({ map: sparkTex, color: 0x5a1fb0, t
 let rifts = [];
 let riftMotes = null;
 let riftsOpened = 0;
+let riftsClosed = 0;
 
 function disposeMotes() {
   if (!riftMotes) return;
@@ -2311,14 +2465,16 @@ function disposeMotes() {
   riftMotes = null;
 }
 
+function disposeRift(rf) {
+  riftGroup.remove(rf.ring, rf.ring2, rf.disc, rf.glow);
+  rf.ring.material.dispose();
+  rf.ring2.material.dispose();
+  rf.disc.material.dispose();
+  rf.glow.material.dispose();
+}
+
 function clearRifts() {
-  for (const rf of rifts) {
-    riftGroup.remove(rf.ring, rf.ring2, rf.disc, rf.glow);
-    rf.ring.material.dispose();
-    rf.ring2.material.dispose();
-    rf.disc.material.dispose();
-    rf.glow.material.dispose();
-  }
+  for (const rf of rifts) disposeRift(rf);
   rifts = [];
   disposeMotes();
 }
@@ -2398,6 +2554,9 @@ function makeRifts(count, rng, { intro = false, grace = 0 } = {}) {
     const ring2 = new THREE.Mesh(riftRing2Geo, riftRingMat.clone());
     const disc = new THREE.Mesh(riftDiscGeo, riftDiscMat.clone());
     const glow = new THREE.Sprite(riftGlowMat.clone());
+    // its own tint, so a tear that has taken a beating can go red on its own
+    ring.material.color = new THREE.Color(RIFT_TINT);
+    ring2.material.color = new THREE.Color(RIFT_TINT);
     ring.position.set(s.x, 1.05, s.z);
     ring2.position.set(s.x, 1.05, s.z);
     ring2.rotation.y = Math.PI / 2;
@@ -2408,10 +2567,12 @@ function makeRifts(count, rng, { intro = false, grace = 0 } = {}) {
     glow.position.set(s.x, 1.0, s.z);
     glow.scale.setScalar(5.6);
     riftGroup.add(ring, ring2, disc, glow);
+    const hp = RIFT.hp(GAME.level);
     rifts.push({
       x: s.x, z: s.z, ring, ring2, disc, glow,
       t: (grace || RIFT.grace(GAME.level)) + i * 1.7 + rng() * 4,
       warnT: 0, spin: rng() * 6.28,
+      hp, maxHp: hp, hitT: 0, dying: false, fuseT: 0, dead: false,
     });
   }
   buildRiftMotes();
@@ -2445,6 +2606,11 @@ function updateRiftMotes(dt) {
   const t = riftMotes.userData.t;
   for (let i = 0; i < motes.length; i++) {
     const m = motes[i];
+    if (m.rf.dead) {
+      // the tear is gone: park its share of the drift out of sight
+      p[i * 3 + 1] = -80;
+      continue;
+    }
     m.y += m.sp * dt;
     if (m.y > 3.6) m.y = 0.02;
     const a = m.a + t * 0.45;
@@ -2455,12 +2621,99 @@ function updateRiftMotes(dt) {
   riftMotes.geometry.attributes.position.needsUpdate = true;
 }
 
+/* A bolt landing on a tear: it flinches, and enough of them and it starts to
+   come apart. The collapse is not instant - the tear howls, flares and throws
+   sparks for a couple of seconds, which is your warning to be somewhere else. */
+function hurtRift(rf, dmg) {
+  if (rf.dying) return;
+  rf.hp -= dmg;
+  rf.hitT = 0.14;
+  spawnBurst(rf.x, 1.15, rf.z, BOOM.spark());
+  gameAudio.sfx("hit", { x: rf.x, z: rf.z });
+  if (rf.hp > 0) return;
+  rf.hp = 0;
+  rf.dying = true;
+  rf.fuseT = RIFT.fuse;
+  spawnBurst(rf.x, 1.1, rf.z, BOOM.rift());
+  gameAudio.sfx("riftDie", { x: rf.x, z: rf.z });
+  gameAudio.poke(0.6);
+  shake = Math.min(1.4, shake + 0.35);
+}
+
+/* the end of it: it goes up, and takes whatever is standing in the blast with it */
+function riftGone(rf) {
+  const i = rifts.indexOf(rf);
+  if (i >= 0) rifts.splice(i, 1);
+  rf.dead = true;
+  disposeRift(rf);
+  riftsClosed++;
+  spawnBurst(rf.x, 1.2, rf.z, BOOM.rift());
+  spawnBurst(rf.x, 1.0, rf.z, BOOM.mine());
+  spawnDebris(rf.x, 1.2, rf.z, {
+    palette: "blast", count: 14, speed: 15, lift: 12, spread: 1.1, life: 10,
+  });
+  gameAudio.sfx("boom", { x: rf.x, z: rf.z });
+  gameAudio.poke(0.8);
+  // the things it was feeding on are the first to go
+  for (const e of enemies) {
+    if (e.dead || e.deck || e.type === "warden") continue; // up on the blocks, out of it
+    const d = Math.hypot(e.x - rf.x, e.z - rf.z);
+    if (d >= RIFT.blast) continue;
+    if (d < RIFT.blast * 0.45) killEnemy(e, { credit: true });
+    else {
+      e.hp -= 6;
+      e.hitT = 0.12;
+    }
+  }
+  // and it costs you if you were standing in it
+  const d = Math.hypot(pos.x - rf.x, pos.z - rf.z);
+  if (d < RIFT.blast) {
+    const k = 1 - d / RIFT.blast;
+    hurtPlayer(RIFT.dmg * k);
+    shake = Math.min(1.8, shake + 0.9 * k);
+    hurtFlash = Math.min(1, hurtFlash + 0.3 * k);
+  } else {
+    shake = Math.min(1.6, shake + 0.4);
+  }
+  if (!rifts.length) disposeMotes(); // nothing left to drift around
+}
+
 function updateRifts(dt) {
-  if (!rifts.length) return;
+  if (!rifts.length) {
+    updateRiftMotes(dt);
+    return;
+  }
   const alive = monstersLeft();
   const cap = levelEnemies(GAME.level) + levelGuards(GAME.level) + RIFT.cap;
+  const doomed = [];
   for (const rf of rifts) {
     rf.spin += dt;
+    rf.hitT = Math.max(0, rf.hitT - dt);
+
+    if (rf.dying) {
+      // not a spawner any more: a hole coming apart, and it is loud about it
+      rf.fuseT -= dt;
+      const k = 1 - Math.max(0, rf.fuseT) / RIFT.fuse;
+      const flick = 0.5 + 0.5 * Math.sin(rf.spin * (16 + k * 34));
+      rf.ring.rotation.z = rf.spin * (3 + k * 8);
+      rf.ring.rotation.x = Math.sin(rf.spin * 6) * 0.5;
+      rf.ring.position.y = 1.05 + Math.sin(rf.spin * 9) * 0.3;
+      rf.ring.scale.setScalar(1 + k * 0.9 + flick * 0.14);
+      rf.ring.material.opacity = 0.45 + flick * 0.55;
+      rf.ring2.rotation.z = -rf.spin * (4 + k * 10);
+      rf.ring2.position.y = 1.05 + Math.cos(rf.spin * 11) * 0.4;
+      rf.ring2.scale.setScalar(1 + k * 1.3 + flick * 0.2);
+      rf.ring2.material.opacity = 0.3 + flick * 0.65;
+      rf.disc.rotation.z = -rf.spin * (0.55 + k * 2);
+      rf.disc.scale.setScalar(1 + k * 0.5);
+      rf.disc.material.opacity = 0.72 + k * 0.24;
+      rf.glow.material.opacity = 0.35 + k * 0.6;
+      rf.glow.scale.setScalar(5.6 + k * 8 + flick * 2.4);
+      if (decor() < dt * 24) spawnBurst(rf.x, 0.6 + decor() * 1.8, rf.z, BOOM.spark());
+      if (rf.fuseT <= 0) doomed.push(rf);
+      continue;
+    }
+
     rf.ring.rotation.z = rf.spin * 1.3;
     rf.ring.rotation.x = Math.sin(rf.spin * 0.6) * 0.25;
     rf.ring.position.y = 1.05 + Math.sin(rf.spin * 1.7) * 0.1;
@@ -2482,13 +2735,22 @@ function updateRifts(dt) {
       continue;
     }
 
-    rf.ring.scale.setScalar(1);
-    rf.ring.material.opacity = 0.36 + 0.16 * Math.sin(rf.spin * 2.3);
-    rf.ring2.scale.setScalar(1);
-    rf.ring2.material.opacity = 0.22 + 0.12 * Math.sin(rf.spin * 3.1);
-    rf.disc.material.opacity = 0.66;
-    rf.glow.material.opacity = 0.26 + 0.1 * Math.sin(rf.spin * 1.9);
-    rf.glow.scale.setScalar(5.6 + Math.sin(rf.spin * 2.1) * 0.7);
+    // a tear that has taken bolts reads as one: it goes red, dims and shudders
+    const hurt = rf.maxHp ? 1 - rf.hp / rf.maxHp : 0;
+    const shakeIt = hurt * 0.09 + rf.hitT * 0.5;
+    rf.ring.material.color.setHex(mixHex(RIFT_TINT, RIFT_TINT_HURT, hurt));
+    rf.ring2.material.color.setHex(mixHex(RIFT_TINT, RIFT_TINT_HURT, hurt));
+    rf.ring.scale.setScalar(1 + rf.hitT * 1.8);
+    rf.ring.material.opacity = 0.36 + 0.16 * Math.sin(rf.spin * 2.3) + hurt * 0.3;
+    rf.ring2.scale.setScalar(1 + rf.hitT * 1.2);
+    rf.ring2.material.opacity = 0.22 + 0.12 * Math.sin(rf.spin * 3.1) + hurt * 0.3;
+    rf.disc.material.opacity = 0.66 - hurt * 0.18;
+    rf.glow.material.opacity = 0.26 + 0.1 * Math.sin(rf.spin * 1.9) + hurt * 0.2;
+    rf.glow.scale.setScalar(5.6 + Math.sin(rf.spin * 2.1) * 0.7 - hurt * 1.2);
+    if (shakeIt > 0) {
+      rf.ring.position.y += Math.sin(rf.spin * 40) * shakeIt * 0.4;
+      rf.ring2.position.y += Math.cos(rf.spin * 47) * shakeIt * 0.4;
+    }
 
     rf.t -= dt;
     if (rf.t > 0) continue;
@@ -2499,6 +2761,7 @@ function updateRifts(dt) {
     if (Math.hypot(pos.x - rf.x, pos.z - rf.z) < RIFT.warn) rf.warnT = RIFT.warnTime;
     else openRift(rf);
   }
+  for (const rf of doomed) riftGone(rf);
   updateRiftMotes(dt);
 }
 
@@ -2533,6 +2796,20 @@ addEventListener("keydown", (e) => {
   }
   if (names.has("KeyF") || names.has("f") || names.has("F")) {
     if (!e.repeat) toggleFullscreen();
+    return;
+  }
+  // the start screen: Enter carries on where you got to, N starts over
+  if (state === "menu") {
+    if (names.has("Enter") || names.has("NumpadEnter")) {
+      if (!e.repeat) chooseStart(menuChoice);
+    } else if (names.has("KeyN") || names.has("n") || names.has("N")) {
+      if (!e.repeat) chooseStart(1);
+    }
+    return;
+  }
+  // and from the results card, Enter goes back to the start screen
+  if (state === "dead" && (names.has("Enter") || names.has("NumpadEnter"))) {
+    if (!e.repeat) showMenu();
     return;
   }
   if (names.has("KeyR") || names.has("r") || names.has("R")) {
@@ -2571,10 +2848,28 @@ const el = {
   liftLab: document.getElementById("liftlab"),
   liftBar: document.getElementById("liftbar"),
   hint: document.getElementById("hint"),
+  btnCont: document.getElementById("btncont"),
+  btnNew: document.getElementById("btnnew"),
 };
 
+// the start screen is the one place the mouse is for anything but shooting
+if (el.btnCont && el.btnCont.addEventListener) {
+  el.btnCont.addEventListener("click", () => chooseStart(menuChoice));
+}
+if (el.btnNew && el.btnNew.addEventListener) {
+  el.btnNew.addEventListener("click", () => chooseStart(1));
+}
+
 const GAME = { level: 1, kills: 0 };
-let state = "playing"; // "playing" | "cleared" | "dead"
+let state = "playing"; // "menu" | "playing" | "cleared" | "dead"
+
+/* --------------------------------------------------------------- progress */
+// The highest level reached is kept in the browser, so a session can be picked
+// up at the deepest level seen. The start screen is the only place that reads
+// it; every level start writes it.
+const saveStore = pickStore(globalThis);
+let SAVE = blank();
+let menuChoice = 1; // what Enter does on the start screen
 let hp = PLAYER_HP;
 let hurtT = 0;
 let hurtFlash = 0;
@@ -2673,6 +2968,35 @@ function showOverlay(title, sub) {
 }
 function hideOverlay() {
   el.overlay.classList.remove("show");
+  el.overlay.classList.remove("menu");
+}
+
+/* ------------------------------------------------------------- start screen */
+// The first thing on screen: what the last run left behind, and two ways in -
+// carry on at the deepest level reached, or start again from the top.
+function showMenu() {
+  state = "menu";
+  SAVE = readSave(saveStore);
+  const best = SAVE.best;
+  el.ovTitle.textContent = "UFO ARENA";
+  el.ovSub.innerHTML = best > 1
+    ? `Best level reached: <b>${best}</b> · ${SAVE.kills} kills · kept in this browser`
+    : "Dark maze, one saucer, a way out.";
+  el.btnCont.innerHTML = best > 1
+    ? `Continue &middot; level <b>${best}</b>`
+    : "Start &middot; level <b>1</b>";
+  el.btnNew.style.display = best > 1 ? "" : "none";
+  menuChoice = best > 1 ? best : 1;
+  el.overlay.classList.add("show", "menu");
+  resetTip(); // the controls line, not the arrival line of whatever level is behind it
+}
+
+// picking a level from the menu: a run starts with a clean score, and the level
+// start writes the save
+function chooseStart(n) {
+  hideOverlay();
+  GAME.kills = 0;
+  startLevel(Math.max(1, Math.floor(n) || 1));
 }
 
 /* fullscreen: F, so the whole screen is the level. Nothing else changes - the
@@ -2704,8 +3028,15 @@ function toggleSound() {
   updateSoundHud();
 }
 
-function startLevel(n) {
+function startLevel(n, { record = true } = {}) {
   GAME.level = n;
+  // the level's look, before a single thing is built out of it
+  palette = levelPalette(n);
+  themeMap = palette.themes;
+  applyPalette();
+  // the level you are on is the level you have reached: the save only ever goes
+  // up, so this cannot lose a deeper level than the one being played
+  if (record) SAVE = writeSave(saveStore, reachLevel(SAVE, n, GAME.kills));
   decor = makeRng(777 + n);
   const size = levelSize(n);
   towerness = levelTowerness(n);
@@ -2713,9 +3044,12 @@ function startLevel(n) {
     cols: size, rows: size, seed: 1000 + n,
     liftCount: levelLifts(n), upper: allow("upper", n),
     rooms: n <= 2 ? 2 : n === 3 ? 4 : 99,
-    startPad: n === UNLOCK.upper,
-    startDeck: n === UNLOCK.upper,
+    startPad: n === UNLOCK.upper || isVoid(n),
+    startDeck: n === UNLOCK.upper || isVoid(n),
     tower: towerness,
+    // the warden level is the level above with the floor taken away: the road of
+    // blocks is the only way from the start room to the exit room
+    voidFloor: isVoid(n),
   });
   buildWorld(level);
   clearEntities();
@@ -2833,16 +3167,24 @@ function startLevel(n) {
      This is what makes the second level a fight rather than a shortcut. */
   {
     const spots = [];
+    // on the void level there is no floor to be "away" from: the road starts in
+    // the room you are standing in, and the wardens are posted along it and on the
+    // islands round it, closer together, so the crossing is a gauntlet
+    const wardMin = isVoid(n) ? 10 : Math.min(22, span * 0.24);
+    const wardGap = isVoid(n) ? 13 : 18;
     for (const key of level.upper) {
       const [c, r] = key.split(",").map(Number);
-      if (near(c, r, pos.x, pos.z) < Math.min(22, span * 0.24)) continue;
-      if (spots.some((w) => Math.hypot(w.x - level.cellToWorldX(c), w.z - level.cellToWorldZ(r)) < 18)) continue;
+      if (near(c, r, pos.x, pos.z) < wardMin) continue;
+      if (spots.some((w) => Math.hypot(w.x - level.cellToWorldX(c), w.z - level.cellToWorldZ(r)) < wardGap)) continue;
       spots.push({ x: level.cellToWorldX(c), z: level.cellToWorldZ(r) });
     }
     const take = () => spots.splice(Math.floor(rng() * spots.length), 1)[0];
+    // the void level's wardens are gentler with the knock: on a road with nothing
+    // under it, being thrown off is a fall, not a setback
+    const soft = isVoid(n) ? { knock: 34, rate: 2.6 } : {};
     for (let i = 0; i < levelWardens(n) && spots.length; i++) {
       const spot = take();
-      enemies.push(spawnEnemy("warden", spot.x, spot.z, n));
+      enemies.push(spawnEnemy("warden", spot.x, spot.z, n, soft));
     }
     for (let i = 0; i < levelDeckers(n) && spots.length; i++) {
       const spot = take();
@@ -2878,8 +3220,8 @@ const ARRIVALS = {
   2: "NEW - SPITTERS: watch the chamber light up, then be somewhere else.",
   3: "NEW - SHADES: they wake when you get close, and they do not miss. Get out of reach.",
   4: "NEW - LIFT PADS: one level up. Up there the blocks are a road, and the holes cost hover.",
-  5: "NEW - SPAWNERS: those rings on the floor keep making monsters. They do not stop.",
-  6: "NEW - WARDENS: they hold the level above. Fight them from their own level, or stay low.",
+  5: "NEW - SPAWNERS: those rings keep making monsters. Shoot one down to close it for good.",
+  6: "NEW - WARDENS: the floor is gone. Cross on the blocks, and shoot their globs out of the air.",
 };
 let tipT = 0;
 function showTip(html, secs = 8) {
@@ -2926,7 +3268,7 @@ function killPlayer({ blast = true } = {}) {
   later(1.5, () => {
     if (state !== "dead") return;
     showOverlay("GAME OVER",
-      `Reached level ${GAME.level} · ${GAME.kills} kills · R restarts level ${GAME.level}`);
+      `Reached level ${GAME.level} · ${GAME.kills} kills · R restarts level ${GAME.level} · Enter for the start screen`);
   });
 }
 
@@ -3442,6 +3784,32 @@ function updateEnemies(dt) {
   }
 }
 
+/* A bolt meeting a shot in flight: the shot comes apart where it is, not on the
+   hull. A glob still goes off - it just goes off out there, and the shove it
+   carries is the only thing you feel for knocking it down that close. */
+function shootDown(j) {
+  const o = eBullets[j];
+  eBullets.splice(j, 1);
+  bulletGroup.remove(o.mesh);
+  gameAudio.sfx("shotDown", { x: o.x, z: o.z });
+  if (o.kind === "glob") {
+    spawnBurst(o.x, o.y, o.z, BOOM.glob());
+    spawnBurst(o.x, o.y, o.z, BOOM.mine());
+    gameAudio.sfx("boom", { x: o.x, z: o.z });
+    const d = Math.hypot(pos.x - o.x, pos.z - o.z);
+    if (d < WARDEN.blast) {
+      const k = 1 - d / WARDEN.blast;
+      shake = Math.min(1.6, shake + 0.7 * k);
+      const v = Math.hypot(o.vx, o.vz) || 1;
+      const knock = o.knock || WARDEN.knock;
+      shoveX += (o.vx / v) * knock * 0.3 * k;
+      shoveZ += (o.vz / v) * knock * 0.3 * k;
+    }
+  } else {
+    spawnBurst(o.x, o.y, o.z, BOOM.spark());
+  }
+}
+
 function updateBullets(dt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
@@ -3474,6 +3842,29 @@ function updateBullets(dt) {
         }
       }
     }
+    if (!kill) {
+      // and a shot can be knocked out of the air: a warden's glob is heavy and
+      // slow precisely so that the answer to it is your gun, not just running
+      for (let j = eBullets.length - 1; j >= 0; j--) {
+        const o = eBullets[j];
+        if (o.level !== b.level) continue;
+        if (Math.hypot(o.x - b.x, o.z - b.z) > o.r + b.r) continue;
+        shootDown(j);
+        kill = true;
+        break;
+      }
+    }
+    if (!kill) {
+      // the tears stand up off the floor, so a bolt from either level goes into
+      // one: a spawner is a thing you can do something about
+      for (const rf of rifts) {
+        if (rf.dying) continue;
+        if (Math.hypot(rf.x - b.x, rf.z - b.z) > RIFT.r + b.r) continue;
+        hurtRift(rf, b.dmg);
+        kill = true;
+        break;
+      }
+    }
     if (hitRock) spawnBurst(b.x, b.y, b.z, BOOM.spark());
     if (kill) {
       bulletGroup.remove(b.mesh);
@@ -3502,8 +3893,9 @@ function updateBullets(dt) {
         hurtPlayer(b.dmg);
         charge = Math.max(0, charge - WARDEN.drain);
         const v = Math.hypot(b.vx, b.vz) || 1;
-        shoveX = (b.vx / v) * WARDEN.knock;
-        shoveZ = (b.vz / v) * WARDEN.knock;
+        const knock = b.knock || WARDEN.knock;
+        shoveX = (b.vx / v) * knock;
+        shoveZ = (b.vz / v) * knock;
         spawnBurst(b.x, b.y, b.z, BOOM.glob());
         spawnBurst(b.x, b.y, b.z, BOOM.mine());
         spawnDebris(b.x, b.y, b.z, {
@@ -3561,7 +3953,10 @@ function checkExit() {
 function updateHud() {
   el.level.textContent = `Level ${GAME.level}`;
   el.kills.textContent = `${GAME.kills} kills`;
-  el.left.textContent = `${monstersLeft()} monsters`;
+  const spawners = rifts.length;
+  el.left.textContent = spawners
+    ? `${monstersLeft()} monsters · ${spawners} spawners`
+    : `${monstersLeft()} monsters`;
   el.hp.style.width = `${(hp / PLAYER_HP) * 100}%`;
 }
 
@@ -3685,6 +4080,11 @@ globalThis.UFO = {
   get levelNow() { return craftLevel(); },
   get rifts() { return rifts; },
   get riftsOpened() { return riftsOpened; },
+  get riftsClosed() { return riftsClosed; },
+  // a shot in the air, for a test that wants one exactly where it wants it
+  shot(kind, x, z, vx, vz, level = 0) {
+    addBullet(eBullets, kind, x, HOVER + level * LIFT.alt - 0.1, z, vx, vz, 3.2, WARDEN.dmg, level);
+  },
   get debris() { return debris; },
   get splats() { return splats; },
   get hunted() { return hunted; },
@@ -3736,6 +4136,8 @@ globalThis.UFO = {
   killPlayer,
   despawn(e) { killEnemy(e, { credit: false, quiet: true }); },
   get exit() { return level.exit; },
+  // the cell the run starts on (the `start(n)` method below is the level starter)
+  get startCell() { return level.start; },
   get rooms() { return level.rooms; },
   get props() {
     return [...level.features.keys()].map((key) => {
@@ -3748,7 +4150,16 @@ globalThis.UFO = {
   // ...and a camera that ignores the chase for one still
   cam(x, y, z, tx, ty, tz) { camOverride = { x, y, z, tx, ty, tz }; },
   camOff() { camOverride = null; },
-  start(n) { startLevel(Math.max(1, Math.floor(n))); },
+  start(n) {
+    // a test or a console call starts a level straight away, past the menu
+    hideOverlay();
+    startLevel(Math.max(1, Math.floor(n)));
+  },
+  get save() { return { ...SAVE }; },
+  get inMenu() { return state === "menu"; },
+  get menuChoice() { return menuChoice; },
+  toMenu() { showMenu(); },
+  choose(n) { chooseStart(Math.max(1, Math.floor(n) || 1)); },
   get ladder() { return { unlock: UNLOCK, enemies: levelEnemies(GAME.level), guards: levelGuards(GAME.level), shades: levelLurkers(GAME.level), rifts: levelRifts(GAME.level), lifts: levelLifts(GAME.level), wardens: levelWardens(GAME.level) }; },
   aim(x, z) { yaw = Math.atan2(x - pos.x, -(z - pos.z)); },
   move(x, z) { pos.x = x; pos.z = z; },
@@ -3757,7 +4168,10 @@ globalThis.UFO = {
 };
 
 /* ------------------------------------------------------------------- go */
-startLevel(1);
+// The world is built first (so the start screen has the level behind it), then
+// the menu takes over until a level is picked.
+startLevel(1, { record: false });
+showMenu();
 
 const clock = new THREE.Clock();
 renderer.setAnimationLoop(() => {

@@ -49,6 +49,23 @@
   </head>
   <body>
     <script type="module">
+      // ?best=N seeds a save before the game reads it, so the start screen can be
+      // photographed (and probed) with something to continue from
+      {
+        const seed = new URLSearchParams(location.search);
+        if (seed.has("best")) {
+          const best = Math.max(1, Number(seed.get("best")) || 1);
+          try {
+            localStorage.setItem("ufo-arena.save", JSON.stringify({
+              version: 1,
+              best,
+              last: Math.max(1, Number(seed.get("last")) || best),
+              kills: Math.max(0, Number(seed.get("kills")) || 0),
+            }));
+          } catch { /* storage refused: the probe just sees an empty save */ }
+        }
+      }
+
       // Reuse the real markup and styling from index.html so this page tests
       // exactly what the game ships with.
       const html = await fetch("../index.html").then((r) => r.text());
@@ -79,6 +96,7 @@
           pad: 4, block: 4, run: 4, deck: 4, hover: 4, vault: 5, pit: 4, pitair: 4,
           warden: 6,
           tunnel: 4, spawners: 5, holeTop: 4, edge: 1, vaultTop: 5, warden: 6, lurk: 3, shade: 3, rift: 5,
+          void: 6,
         };
         let want = Number(q.get("level") || 0);
         if (!want) {
@@ -87,7 +105,8 @@
           if (q.get("boom") === "seeds") want = Math.max(want, 2);
           if (q.has("lift") || q.has("upper") || q.has("holes")) want = Math.max(want, 4);
         }
-        if (want !== 1) {
+        // ?menu keeps the start screen up for the probe; every other probe plays
+        if (!q.has("menu")) {
           UFO.start(want);
           await frames(3);
         }
@@ -197,6 +216,22 @@
           if (v) { UFO.move(v.x, v.z); UFO.aim(rim.x, rim.z); }
         }
         await frames(22);
+      } else if (pose === "tour") {
+        // a wide look over the whole level, for judging a level's palette at a glance
+        UFO.cam(0, 62, 34, 0, 0, 0);
+        await frames(10);
+      } else if (pose === "void") {
+        // the void level from above: the road of blocks, and the holes either side
+        const s = UFO.worldOf(UFO.startCell.col, UFO.startCell.row);
+        const road = UFO.blocks.reduce((b, w) => {
+          const d = Math.hypot(w.x - s.x, w.z - s.z);
+          return !b || d < b.d ? { ...w, d } : b;
+        }, null);
+        if (road) {
+          UFO.move(road.x, road.z);
+          UFO.cam(road.x + 3, 30, road.z + 34, road.x, 0, road.z + 4);
+        }
+        await frames(16);
       } else if (pose === "vaultTop") {
         // straight down over a courtyard: the ring, the courtyard, the pad
         const v = UFO.vaults[0];
@@ -624,6 +659,13 @@
           },
           rooms: UFO.rooms.length,
           startRoom: `${UFO.rooms[0].w}x${UFO.rooms[0].h}`,
+          // the start screen and what it remembers between sessions
+          menu: UFO.inMenu,
+          save: UFO.save,
+          savedRaw: (() => { try { return localStorage.getItem("ufo-arena.save"); } catch { return "n/a"; } })(),
+          menuBtn: document.getElementById("btncont") && document.getElementById("btncont").textContent,
+          menuSub: document.getElementById("ovsub") && document.getElementById("ovsub").textContent,
+          menuBtns: document.getElementById("overlay").classList.contains("menu"),
           // how far the chase camera actually got from the craft: a start room too
           // small shows up here as a camera jammed against the back of the saucer
           camDist: +Math.hypot(UFO.camPos.x - UFO.pos.x, UFO.camPos.z - UFO.pos.z).toFixed(1),
